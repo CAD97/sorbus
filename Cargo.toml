@@ -1,0 +1,17 @@
+[package]
+name = "sorbus"
+version = "0.1.0"
+edition = "2018"
+
+authors = [
+    "Aleksy Kladov <aleksey.kladov@gmail.com>",
+    "Christopher Durham (CAD97) <cad97@cad97.com>",
+]
+
+[dependencies]
+erasable = "1.1.0"
+ptr-union = "1.0.1"
+slice-dst = "1.1.0"
+static_assertions = "1.1.0"
+str-index = { git = "https://github.com/CAD97/str-index.git" }
+rc-borrow = "1.0.0"
