@@ -2,20 +2,35 @@ use {
     crate::{Kind, TextSize},
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{alloc::Layout, convert::TryFrom, ptr},
+    std::{alloc::Layout, convert::TryFrom, hash, ptr},
 };
 
 /// A leaf token in the immutable green tree.
 ///
 /// Tokens are crated using [`Builder::token`](crate::green::Builder::token).
 #[repr(C, align(2))] // NB: align >= 2
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq)]
 pub struct Token {
     // NB: This is optimal layout, as the order is (u32, u16, [u8]).
     // SAFETY: Must be at offset 0 and accurate to trailing array length.
     text_len: TextSize,
     kind: Kind,
     text: str,
+}
+
+// Manually impl Eq/Hash so that builder can spoof it
+// Plus we can skip .text_len since it's derived from .text
+impl PartialEq for Token {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.text == other.text
+    }
+}
+
+impl hash::Hash for Token {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.kind.hash(state);
+        self.text.hash(state);
+    }
 }
 
 #[allow(clippy::len_without_is_empty)]

@@ -3,9 +3,13 @@ use {
         green::{Element, Node, Token},
         Kind, NodeOrToken,
     },
-    hashbrown::HashSet,
+    hashbrown::{hash_map::RawEntryMut, HashMap, HashSet},
     slice_dst::AllocSliceDst,
-    std::{hash, ptr, sync::Arc},
+    std::{
+        hash::{BuildHasher, Hash, Hasher},
+        ptr,
+        sync::Arc,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -40,8 +44,8 @@ impl PartialEq for ThinEqNode {
     }
 }
 
-impl hash::Hash for ThinEqNode {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+impl Hash for ThinEqNode {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.kind().hash(state);
         self.0.len().hash(state);
         for child in self.0.children() {
@@ -62,7 +66,7 @@ impl hash::Hash for ThinEqNode {
 #[derive(Debug, Default, Clone)]
 pub struct Builder {
     nodes: HashSet<ThinEqNode>,
-    tokens: HashSet<Arc<Token>>,
+    tokens: HashMap<Arc<Token>, ()>,
 }
 
 impl Builder {
@@ -83,11 +87,26 @@ impl Builder {
 
     /// Create a new token or clone a new Arc to an existing equivalent one.
     pub fn token(&mut self, kind: Kind, text: &str) -> Arc<Token> {
-        // NB: The text copy can potentially be avoided with more unsafe code.
-        // "Just" set up a map from (kind, text) to the Arc<Token>.
-        // The tricky unsafe is pointing the key at the text in the token.
-        let token: Arc<Token> = Token::new(kind, text);
-        self.tokens.get_or_insert(token).clone()
+        let hash = {
+            // spoof Token's hash impl
+            let mut hasher = self.tokens.hasher().build_hasher();
+            kind.hash(&mut hasher);
+            text.hash(&mut hasher);
+            hasher.finish()
+        };
+
+        let entry = self
+            .tokens
+            .raw_entry_mut()
+            .from_hash(hash, |token| token.kind() == kind && token.text() == text);
+
+        match entry {
+            RawEntryMut::Occupied(entry) => entry.key().clone(),
+            RawEntryMut::Vacant(entry) => {
+                let (token, ()) = entry.insert_hashed_nocheck(hash, Token::new(kind, text), ());
+                token.clone()
+            }
+        }
     }
 }
 

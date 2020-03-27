@@ -5,7 +5,7 @@ use {
     },
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{alloc::Layout, iter::FusedIterator, mem, ptr, slice},
+    std::{alloc::Layout, hash, iter::FusedIterator, mem, ptr, slice},
     text_size::LenTextSize,
 };
 
@@ -13,7 +13,7 @@ use {
 ///
 /// Nodes are crated using [`Builder::node`](crate::green::Builder::node).
 #[repr(C, align(2))] // NB: align >= 2
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq)]
 pub struct Node {
     // NB: This is optimal layout, as the order is (u16, u16, u32, [usize])
     // SAFETY: Must be at offset 0 and accurate to trailing array length.
@@ -21,6 +21,24 @@ pub struct Node {
     kind: Kind,
     text_len: TextSize,
     children: [Element],
+}
+
+// Manually impl Eq/Hash to match Token
+// Plus we can skip .children_len since it's derived from .children
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.text_len == other.text_len
+            && self.children == other.children
+    }
+}
+
+impl hash::Hash for Node {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.kind.hash(state);
+        self.text_len.hash(state);
+        self.children.hash(state);
+    }
 }
 
 #[allow(clippy::len_without_is_empty)]
