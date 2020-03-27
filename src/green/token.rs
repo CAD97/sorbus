@@ -1,8 +1,8 @@
 use {
-    crate::{Kind, StrIndex},
+    crate::{Kind, TextSize},
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{alloc::Layout, ptr},
+    std::{alloc::Layout, convert::TryFrom, ptr},
 };
 
 /// A leaf token in the immutable green tree.
@@ -13,7 +13,7 @@ use {
 pub struct Token {
     // NB: This is optimal layout, as the order is (u32, u16, [u8]).
     // SAFETY: Must be at offset 0 and accurate to trailing array length.
-    text_len: StrIndex,
+    text_len: TextSize,
     kind: Kind,
     text: str,
 }
@@ -31,13 +31,13 @@ impl Token {
     }
 
     /// The length of text at this token.
-    pub fn len(&self) -> StrIndex {
+    pub fn len(&self) -> TextSize {
         self.text_len
     }
 
     // SAFETY: must accurately calculate the layout for length `len`
     fn layout(len: usize) -> (Layout, [usize; 3]) {
-        let (layout, offset_0) = (Layout::new::<StrIndex>(), 0);
+        let (layout, offset_0) = (Layout::new::<TextSize>(), 0);
         let (layout, offset_1) = layout.extend(Layout::new::<Kind>()).unwrap();
         let (layout, offset_2) = layout.extend(Layout::array::<u8>(len).unwrap()).unwrap();
         (layout.pad_to_align(), [offset_0, offset_1, offset_2])
@@ -49,8 +49,7 @@ impl Token {
         A: AllocSliceDst<Self>,
     {
         let len = text.len();
-        assert!(len <= u32::MAX as usize, "text too long");
-        let text_len = len as u32;
+        let text_len = TextSize::try_from(len).expect("text too long");
         let (layout, [text_len_offset, kind_offset, text_offset]) = Self::layout(len);
 
         unsafe {
@@ -71,8 +70,8 @@ impl Token {
 unsafe impl Erasable for Token {
     unsafe fn unerase(this: ErasedPtr) -> ptr::NonNull<Self> {
         // SAFETY: text_len is at 0 offset
-        let text_len: u32 = ptr::read(this.cast().as_ptr());
-        let ptr = ptr::slice_from_raw_parts_mut(this.as_ptr().cast(), text_len as usize);
+        let text_len: TextSize = ptr::read(this.cast().as_ptr());
+        let ptr = ptr::slice_from_raw_parts_mut(this.as_ptr().cast(), text_len.into());
         // SAFETY: ptr comes from NonNull
         Self::retype(ptr::NonNull::new_unchecked(ptr))
     }

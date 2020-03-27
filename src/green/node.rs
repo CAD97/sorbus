@@ -1,13 +1,12 @@
-use crate::NodeOrToken;
-use static_assertions::_core::iter::FusedIterator;
 use {
     crate::{
         green::{Element, Token},
-        ArcBorrow, Kind, StrIndex,
+        ArcBorrow, Kind, NodeOrToken, TextSize,
     },
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{alloc::Layout, ptr, slice},
+    std::{alloc::Layout, iter::FusedIterator, mem, ptr, slice},
+    text_size::LenTextSize,
 };
 
 /// A nonleaf node in the immutable green tree.
@@ -20,7 +19,7 @@ pub struct Node {
     // SAFETY: Must be at offset 0 and accurate to trailing array length.
     children_len: u16,
     kind: Kind,
-    text_len: StrIndex,
+    text_len: TextSize,
     children: [Element],
 }
 
@@ -32,7 +31,7 @@ impl Node {
     }
 
     /// The length of text at this node.
-    pub fn len(&self) -> StrIndex {
+    pub fn len(&self) -> TextSize {
         self.text_len
     }
 
@@ -42,13 +41,19 @@ impl Node {
     }
 }
 
+impl LenTextSize for &'_ Node {
+    fn len_text_size(self) -> TextSize {
+        self.len()
+    }
+}
+
 #[allow(clippy::len_without_is_empty)]
 impl Node {
     // SAFETY: must accurately calculate the layout for length `len`
     fn layout(len: usize) -> (Layout, [usize; 4]) {
         let (layout, offset_0) = (Layout::new::<u16>(), 0);
         let (layout, offset_1) = layout.extend(Layout::new::<Kind>()).unwrap();
-        let (layout, offset_2) = layout.extend(Layout::new::<StrIndex>()).unwrap();
+        let (layout, offset_2) = layout.extend(Layout::new::<TextSize>()).unwrap();
         let (layout, offset_3) = layout.extend(Layout::array::<Element>(len).unwrap()).unwrap();
         (layout.pad_to_align(), [offset_0, offset_1, offset_2, offset_3])
     }
@@ -64,26 +69,57 @@ impl Node {
         let len = children.len();
         assert!(len <= u16::MAX as usize, "more children than fit in one node");
         let children_len = len as u16;
-        let mut text_len = StrIndex::from(0);
+        let mut text_len = TextSize::zero();
         let (layout, [children_len_offset, kind_offset, text_len_offset, children_offset]) =
             Self::layout(len);
 
         unsafe {
             // SAFETY: closure fully initializes the place
             A::new_slice_dst(len, |ptr| {
+                /// Helper to drop children on panic.
+                struct ChildrenWriter {
+                    raw: *mut Element,
+                    len: usize,
+                }
+
+                impl Drop for ChildrenWriter {
+                    fn drop(&mut self) {
+                        unsafe {
+                            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.raw, self.len));
+                        }
+                    }
+                }
+
+                impl ChildrenWriter {
+                    unsafe fn push(&mut self, element: Element) {
+                        ptr::write(self.raw.add(self.len), element);
+                        self.len += 1;
+                    }
+
+                    fn finish(self) {
+                        mem::forget(self)
+                    }
+                }
+
                 let raw = ptr.as_ptr().cast::<u8>();
+
                 ptr::write(raw.add(children_len_offset).cast(), children_len);
                 ptr::write(raw.add(kind_offset).cast(), kind);
-                let mut child_ptr = raw.add(children_offset).cast::<Element>();
+
+                let mut children_writer =
+                    ChildrenWriter { raw: raw.add(children_offset).cast(), len: 0 };
                 for _ in 0..len {
-                    let child = children.next().expect("children iterator over-reported length");
-                    text_len += child.len();
-                    ptr::write(child_ptr, child);
-                    child_ptr = child_ptr.offset(1);
+                    let child: Element =
+                        children.next().expect("children iterator over-reported length");
+                    text_len = text_len.checked_add(child.len()).expect("TextSize overflow");
+                    children_writer.push(child);
                 }
                 assert!(children.next().is_none(), "children iterator under-reported length");
+
                 ptr::write(raw.add(text_len_offset).cast(), text_len);
-                debug_assert_eq!(layout, Layout::for_value(ptr.as_ref()))
+                debug_assert_eq!(layout, Layout::for_value(ptr.as_ref()));
+
+                children_writer.finish()
             })
         }
     }
@@ -94,7 +130,7 @@ unsafe impl Erasable for Node {
     unsafe fn unerase(this: ErasedPtr) -> ptr::NonNull<Self> {
         // SAFETY: children_len is at 0 offset
         let children_len: u16 = ptr::read(this.cast().as_ptr());
-        let ptr = ptr::slice_from_raw_parts_mut(this.as_ptr().cast(), children_len as usize);
+        let ptr = ptr::slice_from_raw_parts_mut(this.as_ptr().cast(), children_len.into());
         // SAFETY: ptr comes from NonNull
         Self::retype(ptr::NonNull::new_unchecked(ptr))
     }
@@ -141,7 +177,7 @@ impl<'a> Children<'a> {
     ///
     /// # Panics
     ///
-    /// Panics if `mod > len`.
+    /// Panics if `mid > len`.
     pub fn split_at(&self, mid: usize) -> (Self, Self) {
         let (left, right) = self.inner.as_slice().split_at(mid);
         (Children { inner: left.iter() }, Children { inner: right.iter() })

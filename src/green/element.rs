@@ -1,10 +1,11 @@
 use {
     crate::{
         green::{Node, Token},
-        ArcBorrow, NodeOrToken, StrIndex,
+        ArcBorrow, NodeOrToken, TextSize,
     },
     ptr_union::{Enum2, Union2, UnionBuilder},
     std::{mem, sync::Arc},
+    text_size::LenTextSize,
 };
 
 // SAFETY: align of Node and Token are >= 2
@@ -31,11 +32,17 @@ impl Element {
         Element { raw: ARC_UNION_PROOF.b(token) }
     }
 
-    pub(super) fn len(&self) -> StrIndex {
+    pub(super) fn len(&self) -> TextSize {
         match self.raw.as_deref(REF_UNION_PROOF).unpack() {
             Enum2::A(node) => node.len(),
             Enum2::B(token) => token.len(),
         }
+    }
+}
+
+impl LenTextSize for &'_ Element {
+    fn len_text_size(self) -> TextSize {
+        self.len()
     }
 }
 

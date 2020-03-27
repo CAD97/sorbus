@@ -9,9 +9,8 @@ authors = [
 ]
 
 [dependencies]
-erasable = "1.1.0"
-ptr-union = "1.0.1"
-slice-dst = "1.1.0"
-static_assertions = "1.1.0"
-str-index = { git = "https://github.com/CAD97/str-index.git" }
-rc-borrow = "1.0.0"
+erasable = "1.1"
+ptr-union = "1.0"
+rc-borrow = "1.0"
+slice-dst = "1.2"
+text-size = "0.99.0-dev.3"
