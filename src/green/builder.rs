@@ -3,8 +3,9 @@ use {
         green::{Element, Node, Token},
         Kind, NodeOrToken,
     },
+    hashbrown::HashSet,
     slice_dst::AllocSliceDst,
-    std::{collections::HashSet, hash, ptr, sync::Arc},
+    std::{hash, ptr, sync::Arc},
 };
 
 #[derive(Debug, Clone)]
@@ -77,13 +78,7 @@ impl Builder {
         I::IntoIter: ExactSizeIterator,
     {
         let node = Node::new(kind, children.into_iter().map(Into::into).map(Into::into));
-        // self.nodes.get_or_insert(node).0.clone()
-        if let Some(node) = self.nodes.get(&node) {
-            node.0.clone()
-        } else {
-            self.nodes.insert(node.clone());
-            node.0
-        }
+        self.nodes.get_or_insert(node).0.clone()
     }
 
     /// Create a new token or clone a new Arc to an existing equivalent one.
@@ -92,13 +87,7 @@ impl Builder {
         // "Just" set up a map from (kind, text) to the Arc<Token>.
         // The tricky unsafe is pointing the key at the text in the token.
         let token: Arc<Token> = Token::new(kind, text);
-        // self.tokens.get_or_insert(token).clone()
-        if let Some(token) = self.tokens.get(&token) {
-            token.clone()
-        } else {
-            self.tokens.insert(token.clone());
-            token
-        }
+        self.tokens.get_or_insert(token).clone()
     }
 }
 

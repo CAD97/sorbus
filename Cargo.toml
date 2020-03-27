@@ -10,6 +10,7 @@ authors = [
 
 [dependencies]
 erasable = "1.1"
+hashbrown = "0.7"
 ptr-union = "1.0"
 rc-borrow = "1.0"
 slice-dst = "1.2"
