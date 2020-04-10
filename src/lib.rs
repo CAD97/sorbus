@@ -10,6 +10,7 @@
 #![feature(alloc_layout_extra)] // rust-lang/rust#69362, hopefully targeting 1.44
 #![forbid(unconditional_recursion)]
 #![warn(missing_debug_implementations, missing_docs)]
+#![allow(unused)]
 
 pub mod green;
 mod utils;

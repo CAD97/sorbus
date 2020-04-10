@@ -55,7 +55,8 @@ impl Node {
 
     /// Child elements of this node.
     pub fn children(&self) -> Children<'_> {
-        Children { inner: self.children.iter() }
+        todo!()
+        // Children { inner: self.children.iter() }
     }
 }
 
@@ -91,55 +92,56 @@ impl Node {
         let (layout, [children_len_offset, kind_offset, text_len_offset, children_offset]) =
             Self::layout(len);
 
-        unsafe {
-            // SAFETY: closure fully initializes the place
-            A::new_slice_dst(len, |ptr| {
-                /// Helper to drop children on panic.
-                struct ChildrenWriter {
-                    raw: *mut Element,
-                    len: usize,
-                }
-
-                impl Drop for ChildrenWriter {
-                    fn drop(&mut self) {
-                        unsafe {
-                            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.raw, self.len));
-                        }
-                    }
-                }
-
-                impl ChildrenWriter {
-                    unsafe fn push(&mut self, element: Element) {
-                        ptr::write(self.raw.add(self.len), element);
-                        self.len += 1;
-                    }
-
-                    fn finish(self) {
-                        mem::forget(self)
-                    }
-                }
-
-                let raw = ptr.as_ptr().cast::<u8>();
-
-                ptr::write(raw.add(children_len_offset).cast(), children_len);
-                ptr::write(raw.add(kind_offset).cast(), kind);
-
-                let mut children_writer =
-                    ChildrenWriter { raw: raw.add(children_offset).cast(), len: 0 };
-                for _ in 0..len {
-                    let child: Element =
-                        children.next().expect("children iterator over-reported length");
-                    text_len = text_len.checked_add(child.len()).expect("TextSize overflow");
-                    children_writer.push(child);
-                }
-                assert!(children.next().is_none(), "children iterator under-reported length");
-
-                ptr::write(raw.add(text_len_offset).cast(), text_len);
-                debug_assert_eq!(layout, Layout::for_value(ptr.as_ref()));
-
-                children_writer.finish()
-            })
-        }
+        todo!()
+        // unsafe {
+        //     // SAFETY: closure fully initializes the place
+        //     A::new_slice_dst(len, |ptr| {
+        //         /// Helper to drop children on panic.
+        //         struct ChildrenWriter {
+        //             raw: *mut Element,
+        //             len: usize,
+        //         }
+        //
+        //         impl Drop for ChildrenWriter {
+        //             fn drop(&mut self) {
+        //                 unsafe {
+        //                     ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.raw, self.len));
+        //                 }
+        //             }
+        //         }
+        //
+        //         impl ChildrenWriter {
+        //             unsafe fn push(&mut self, element: Element) {
+        //                 ptr::write(self.raw.add(self.len), element);
+        //                 self.len += 1;
+        //             }
+        //
+        //             fn finish(self) {
+        //                 mem::forget(self)
+        //             }
+        //         }
+        //
+        //         let raw = ptr.as_ptr().cast::<u8>();
+        //
+        //         ptr::write(raw.add(children_len_offset).cast(), children_len);
+        //         ptr::write(raw.add(kind_offset).cast(), kind);
+        //
+        //         let mut children_writer =
+        //             ChildrenWriter { raw: raw.add(children_offset).cast(), len: 0 };
+        //         for _ in 0..len {
+        //             let child: Element =
+        //                 children.next().expect("children iterator over-reported length");
+        //             text_len = text_len.checked_add(child.len()).expect("TextSize overflow");
+        //             children_writer.push(child);
+        //         }
+        //         assert!(children.next().is_none(), "children iterator under-reported length");
+        //
+        //         ptr::write(raw.add(text_len_offset).cast(), text_len);
+        //         debug_assert_eq!(layout, Layout::for_value(ptr.as_ref()));
+        //
+        //         children_writer.finish()
+        //     })
+        // }
     }
 }
 
@@ -177,7 +179,8 @@ pub struct Children<'a> {
 impl<'a> Children<'a> {
     /// Get the next item in the iterator without advancing it.
     pub fn peek(&self) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
-        self.inner.as_slice().first().map(Into::into)
+        todo!()
+        // self.inner.as_slice().first().map(Into::into)
     }
 
     /// Get the nth item in the iterator without advancing it.
@@ -185,7 +188,8 @@ impl<'a> Children<'a> {
         &self,
         n: usize,
     ) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
-        self.inner.as_slice().get(n).map(Into::into)
+        todo!()
+        // self.inner.as_slice().get(n).map(Into::into)
     }
 
     /// Divide this iterator into two at an index.
@@ -197,8 +201,9 @@ impl<'a> Children<'a> {
     ///
     /// Panics if `mid > len`.
     pub fn split_at(&self, mid: usize) -> (Self, Self) {
-        let (left, right) = self.inner.as_slice().split_at(mid);
-        (Children { inner: left.iter() }, Children { inner: right.iter() })
+        todo!()
+        // let (left, right) = self.inner.as_slice().split_at(mid);
+        // (Children { inner: left.iter() }, Children { inner: right.iter() })
     }
 }
 
@@ -212,40 +217,48 @@ impl<'a> Iterator for Children<'a> {
     type Item = NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(Into::into)
+        todo!()
+        // self.inner.next().map(Into::into)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
+        todo!()
+        // self.inner.size_hint()
     }
 
     fn count(self) -> usize {
-        self.inner.count()
+        todo!()
+        // self.inner.count()
     }
 
     fn last(self) -> Option<Self::Item> {
-        self.inner.last().map(Into::into)
+        todo!()
+        // self.inner.last().map(Into::into)
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.inner.nth(n).map(Into::into)
+        todo!()
+        // self.inner.nth(n).map(Into::into)
     }
 }
 
 impl ExactSizeIterator for Children<'_> {
     #[inline(always)]
     fn len(&self) -> usize {
-        self.inner.len()
+        todo!()
+        // self.inner.len()
     }
 }
 
 impl DoubleEndedIterator for Children<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.inner.next_back().map(Into::into)
+        todo!()
+        // self.inner.next_back().map(Into::into)
     }
 
     fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        self.inner.nth_back(n).map(Into::into)
+        todo!()
+        // self.inner.nth_back(n).map(Into::into)
     }
 }
 
