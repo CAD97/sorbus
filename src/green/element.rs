@@ -5,14 +5,13 @@ use {
     },
     ptr_union::{Enum2, Union2, UnionBuilder},
     std::{mem, sync::Arc},
-    text_size::LenTextSize,
+    text_size::TextLen,
 };
 
 // SAFETY: align of Node and Token are >= 2
 const ARC_UNION_PROOF: UnionBuilder<Union2<Arc<Node>, Arc<Token>>> =
-    unsafe { UnionBuilder::<Union2<_, _>>::new() };
-const REF_UNION_PROOF: UnionBuilder<Union2<&Node, &Token>> =
-    unsafe { UnionBuilder::<Union2<_, _>>::new() };
+    unsafe { UnionBuilder::new2() };
+const REF_UNION_PROOF: UnionBuilder<Union2<&Node, &Token>> = unsafe { UnionBuilder::new2() };
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub(super) struct Element {
@@ -40,8 +39,8 @@ impl Element {
     }
 }
 
-impl LenTextSize for &'_ Element {
-    fn len_text_size(self) -> TextSize {
+impl TextLen for &'_ Element {
+    fn text_len(self) -> TextSize {
         self.len()
     }
 }
