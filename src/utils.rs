@@ -1,7 +1,6 @@
 use {
     crate::prelude::{GreenNode, GreenToken},
     std::{ops::Deref, sync::Arc},
-    erasable::ErasablePtr,
 };
 
 /// Raw kind tag for each element in the tree.

@@ -1,6 +1,6 @@
 use {
     crate::{
-        green::{Element, Node, Token},
+        green::{Node, Token},
         Kind, NodeOrToken,
     },
     hashbrown::{hash_map::RawEntryMut, HashMap, HashSet},

@@ -1,15 +1,13 @@
 use {
     crate::{
-        green::{Element, Token},
+        green::{Element, FullAlignedElement, HalfAlignedElement, Token},
         ArcBorrow, Kind, NodeOrToken, TextSize,
     },
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{alloc::Layout, hash, iter::FusedIterator, mem, ptr, slice, sync::Arc},
+    std::{alloc::Layout, hash, iter::FusedIterator, mem::ManuallyDrop, ptr, slice, sync::Arc},
     text_size::TextLen,
 };
-use std::mem::ManuallyDrop;
-use crate::green::element::{FullAlignedElement, HalfAlignedElement};
 
 /// A nonleaf node in the immutable green tree.
 ///

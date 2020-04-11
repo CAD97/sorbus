@@ -24,15 +24,13 @@ use {
         ArcBorrow, NodeOrToken, TextSize,
     },
     erasable::{ErasablePtr, ErasedPtr},
-    ptr_union::{Enum2, Union2, UnionBuilder},
+    ptr_union::{Union2, UnionBuilder},
     std::{
         fmt,
-        ptr,
         hash::{self, Hash},
-        mem::{self, ManuallyDrop},
+        ptr,
         sync::Arc,
     },
-    text_size::TextLen,
 };
 
 // SAFETY: align of Node and Token are >= 2
@@ -65,10 +63,6 @@ struct FullAlignedElementRepr {
 /// # Safety
 ///
 /// Must be aligned to 8 bytes (usize).
-///
-/// An improperly aligned element may only exist as long as is required to
-/// write it to an aligned location; no methods may be used until the element
-/// has been properly aligned.
 #[repr(transparent)]
 pub(super) struct FullAlignedElement {
     repr: FullAlignedElementRepr,
@@ -92,10 +86,6 @@ struct HalfAlignedElementRepr {
 ///
 /// Must be aligned to 8 bytes + 4 (usize + 1/2).
 /// (That is, aligned to 4 but not 8.)
-///
-/// An improperly aligned element may only exist as long as is required to
-/// write it to an aligned location; no methods may be used until the element
-/// has been properly aligned.
 #[repr(transparent)]
 pub(super) struct HalfAlignedElement {
     repr: HalfAlignedElementRepr,
