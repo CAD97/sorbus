@@ -8,6 +8,8 @@ use {
     std::{alloc::Layout, hash, iter::FusedIterator, mem, ptr, slice, sync::Arc},
     text_size::TextLen,
 };
+use std::mem::ManuallyDrop;
+use crate::green::element::{FullAlignedElement, HalfAlignedElement};
 
 /// A nonleaf node in the immutable green tree.
 ///
@@ -106,60 +108,66 @@ impl Node {
         let len = children.len();
         assert!(len <= u16::MAX as usize, "more children than fit in one node");
         let children_len = len as u16;
-        let mut text_len = TextSize::zero();
         let (layout, [children_len_offset, kind_offset, text_len_offset, children_offset]) =
             Self::layout(len);
 
-        todo!()
-        // unsafe {
-        //     // SAFETY: closure fully initializes the place
-        //     A::new_slice_dst(len, |ptr| {
-        //         /// Helper to drop children on panic.
-        //         struct ChildrenWriter {
-        //             raw: *mut Element,
-        //             len: usize,
-        //         }
-        //
-        //         impl Drop for ChildrenWriter {
-        //             fn drop(&mut self) {
-        //                 unsafe {
-        //                     ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.raw, self.len));
-        //                 }
-        //             }
-        //         }
-        //
-        //         impl ChildrenWriter {
-        //             unsafe fn push(&mut self, element: Element) {
-        //                 ptr::write(self.raw.add(self.len), element);
-        //                 self.len += 1;
-        //             }
-        //
-        //             fn finish(self) {
-        //                 mem::forget(self)
-        //             }
-        //         }
-        //
-        //         let raw = ptr.as_ptr().cast::<u8>();
-        //
-        //         ptr::write(raw.add(children_len_offset).cast(), children_len);
-        //         ptr::write(raw.add(kind_offset).cast(), kind);
-        //
-        //         let mut children_writer =
-        //             ChildrenWriter { raw: raw.add(children_offset).cast(), len: 0 };
-        //         for _ in 0..len {
-        //             let child: Element =
-        //                 children.next().expect("children iterator over-reported length");
-        //             text_len = text_len.checked_add(child.len()).expect("TextSize overflow");
-        //             children_writer.push(child);
-        //         }
-        //         assert!(children.next().is_none(), "children iterator under-reported length");
-        //
-        //         ptr::write(raw.add(text_len_offset).cast(), text_len);
-        //         debug_assert_eq!(layout, Layout::for_value(ptr.as_ref()));
-        //
-        //         children_writer.finish()
-        //     })
-        // }
+        unsafe {
+            // SAFETY: closure fully initializes the place
+            A::new_slice_dst(len, |ptr| {
+                /// Helper to drop children on panic.
+                struct ChildrenWriter {
+                    raw: *mut Element,
+                    len: usize,
+                    text_len: TextSize,
+                }
+
+                impl Drop for ChildrenWriter {
+                    fn drop(&mut self) {
+                        unsafe {
+                            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.raw, self.len));
+                        }
+                    }
+                }
+
+                impl ChildrenWriter {
+                    fn new(raw: *mut Element) -> Self {
+                        ChildrenWriter { raw, len: 0, text_len: TextSize::zero() }
+                    }
+
+                    unsafe fn push(&mut self, element: NodeOrToken<Arc<Node>, Arc<Token>>) {
+                        let offset = self.text_len;
+                        self.text_len += element.as_deref().map(Node::len, Token::len).flatten();
+                        if self.len % 2 == 0 {
+                            FullAlignedElement::write(self.raw.add(self.len), element, offset);
+                        } else {
+                            HalfAlignedElement::write(self.raw.add(self.len), element, offset);
+                        }
+                        self.len += 1;
+                    }
+
+                    fn finish(self) -> TextSize {
+                        ManuallyDrop::new(self).text_len
+                    }
+                }
+
+                let raw = ptr.as_ptr().cast::<u8>();
+
+                ptr::write(raw.add(children_len_offset).cast(), children_len);
+                ptr::write(raw.add(kind_offset).cast(), kind);
+
+                let mut children_writer = ChildrenWriter::new(raw.add(children_offset).cast());
+                for _ in 0..len {
+                    let child: NodeOrToken<Arc<Node>, Arc<Token>> =
+                        children.next().expect("children iterator over-reported length");
+                    children_writer.push(child);
+                }
+                assert!(children.next().is_none(), "children iterator under-reported length");
+
+                let text_len = children_writer.finish();
+                ptr::write(raw.add(text_len_offset).cast(), text_len);
+                debug_assert_eq!(layout, Layout::for_value(ptr.as_ref()));
+            })
+        }
     }
 }
 

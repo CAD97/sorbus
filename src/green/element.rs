@@ -23,16 +23,21 @@ use {
         green::{Node, Token},
         ArcBorrow, NodeOrToken, TextSize,
     },
+    erasable::{ErasablePtr, ErasedPtr},
     ptr_union::{Enum2, Union2, UnionBuilder},
+    std::{
+        fmt,
+        ptr,
+        hash::{self, Hash},
+        mem::{self, ManuallyDrop},
+        sync::Arc,
+    },
     text_size::TextLen,
-    std::{mem::{self, ManuallyDrop}, sync::Arc, fmt, hash::{self, Hash}},
-    erasable::{ErasedPtr, ErasablePtr},
 };
 
-// // SAFETY: align of Node and Token are >= 2
-// const ARC_UNION_PROOF: UnionBuilder<Union2<Arc<Node>, Arc<Token>>> =
-//     unsafe { UnionBuilder::new2() };
-// const REF_UNION_PROOF: UnionBuilder<Union2<&Node, &Token>> = unsafe { UnionBuilder::new2() };
+// SAFETY: align of Node and Token are >= 2
+const ARC_UNION_PROOF: UnionBuilder<Union2<Arc<Node>, Arc<Token>>> =
+    unsafe { UnionBuilder::new2() };
 
 /// # Safety
 ///
@@ -142,6 +147,21 @@ impl FullAlignedElement {
     pub(super) fn offset(&self) -> TextSize {
         unsafe { *&self.repr.offset }
     }
+
+    pub(super) unsafe fn write(
+        ptr: *mut Element,
+        element: NodeOrToken<Arc<Node>, Arc<Token>>,
+        offset: TextSize,
+    ) {
+        debug_assert!(ptr as usize % 8 == 0);
+        let element =
+            element.map(|node| ARC_UNION_PROOF.a(node), |token| ARC_UNION_PROOF.b(token)).flatten();
+        let element = ErasablePtr::erase(element);
+        let ptr = ptr.cast();
+        ptr::write(ptr, element);
+        let ptr = ptr.add(1).cast();
+        ptr::write(ptr, offset);
+    }
 }
 
 impl HalfAlignedElement {
@@ -153,6 +173,21 @@ impl HalfAlignedElement {
     #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
     pub(super) fn offset(&self) -> TextSize {
         unsafe { *&self.repr.offset }
+    }
+
+    pub(super) unsafe fn write(
+        ptr: *mut Element,
+        element: NodeOrToken<Arc<Node>, Arc<Token>>,
+        offset: TextSize,
+    ) {
+        debug_assert!(ptr as usize % 8 == 4);
+        let element =
+            element.map(|node| ARC_UNION_PROOF.a(node), |token| ARC_UNION_PROOF.b(token)).flatten();
+        let element = ErasablePtr::erase(element);
+        let ptr = ptr.cast();
+        ptr::write(ptr, offset);
+        let ptr = ptr.add(1).cast();
+        ptr::write(ptr, element);
     }
 }
 
