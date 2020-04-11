@@ -70,6 +70,11 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Create a new builder.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Create a new node or clone a new Arc to an existing equivalent one.
     ///
     /// This checks children for identity equivalence, not structural,
