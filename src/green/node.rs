@@ -5,7 +5,7 @@ use {
     },
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{alloc::Layout, hash, iter::FusedIterator, mem, ptr, slice},
+    std::{alloc::Layout, hash, iter::FusedIterator, mem, ptr, slice, sync::Arc},
     text_size::TextLen,
 };
 
@@ -81,7 +81,7 @@ impl Node {
     pub(super) fn new<A, I>(kind: Kind, children: I) -> A
     where
         A: AllocSliceDst<Self>,
-        I: IntoIterator<Item = Element>,
+        I: IntoIterator<Item = NodeOrToken<Arc<Node>, Arc<Token>>>,
         I::IntoIter: ExactSizeIterator,
     {
         let mut children = children.into_iter();
