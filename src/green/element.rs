@@ -41,6 +41,8 @@ const ARC_UNION_PROOF: UnionBuilder<Union2<Arc<Node>, Arc<Token>>> =
 ///
 /// - If aligned to 8 bytes, must be `.full_aligned`
 /// - If aligned to 8 bytes + 4, must be `.half_aligned`
+///
+/// To avoid leaks, must be dropped via drop_in_place-ing the correct member.
 #[repr(align(4))]
 pub(super) union Element {
     full_aligned: FullAlignedElementRepr,
@@ -52,7 +54,7 @@ pub(super) union Element {
 /// - Must be aligned to 8 bytes (usize)
 /// - This is only Copy because of requirements for `union`;
 ///   logically this is a `(Union2<Arc<Node>, Arc<Token>>, TextSize)`,
-///   and must be cloned as such.
+///   and must be treated as such.
 #[derive(Copy, Clone)] // required for union
 #[repr(C, packed)]
 struct FullAlignedElementRepr {
@@ -74,7 +76,7 @@ pub(super) struct FullAlignedElement {
 ///   (That is, aligned to 4 but not 8.)
 /// - This is only Copy because of requirements for `union`;
 ///   logically this is a `(Union2<Arc<Node>, Arc<Token>>, TextSize)`,
-///   and must be cloned as such.
+///   and must be treated as such.
 #[derive(Copy, Clone)] // required for union
 #[repr(C, packed)]
 struct HalfAlignedElementRepr {
@@ -101,6 +103,11 @@ impl Element {
         &*(&self.full_aligned as *const FullAlignedElementRepr as *const FullAlignedElement)
     }
 
+    pub(super) unsafe fn full_aligned_mut(&mut self) -> &mut FullAlignedElement {
+        debug_assert!(self.is_full_aligned());
+        &mut *(&mut self.full_aligned as *mut FullAlignedElementRepr as *mut FullAlignedElement)
+    }
+
     pub(super) fn is_half_aligned(&self) -> bool {
         self as *const Self as usize % 8 == 4
     }
@@ -108,6 +115,11 @@ impl Element {
     pub(super) unsafe fn half_aligned(&self) -> &HalfAlignedElement {
         debug_assert!(self.is_half_aligned());
         &*(&self.half_aligned as *const HalfAlignedElementRepr as *const HalfAlignedElement)
+    }
+
+    pub(super) unsafe fn half_aligned_mut(&mut self) -> &mut HalfAlignedElement {
+        debug_assert!(self.is_half_aligned());
+        &mut *(&mut self.half_aligned as *mut HalfAlignedElementRepr as *mut HalfAlignedElement)
     }
 
     pub(super) fn ptr(&self) -> Union2<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>> {
@@ -178,6 +190,26 @@ impl HalfAlignedElement {
         ptr::write(ptr, offset);
         let ptr = ptr.add(1).cast();
         ptr::write(ptr, element);
+    }
+}
+
+impl Drop for FullAlignedElement {
+    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
+    fn drop(&mut self) {
+        debug_assert!(self as *const _ as usize % 8 == 0);
+        unsafe {
+            <Union2<Arc<Node>, Arc<Token>> as ErasablePtr>::unerase(*&self.repr.ptr);
+        }
+    }
+}
+
+impl Drop for HalfAlignedElement {
+    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
+    fn drop(&mut self) {
+        debug_assert!(self as *const _ as usize % 8 == 4);
+        unsafe {
+            <Union2<Arc<Node>, Arc<Token>> as ErasablePtr>::unerase(*&self.repr.ptr);
+        }
     }
 }
 

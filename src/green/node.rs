@@ -42,6 +42,21 @@ impl hash::Hash for Node {
     }
 }
 
+// Element is a union, so we have to make sure to drop them manually here.
+impl Drop for Node {
+    fn drop(&mut self) {
+        let mut children = self.children.iter_mut();
+        unsafe {
+            (|| -> Option<()> {
+                loop {
+                    ptr::drop_in_place(children.next()?.full_aligned_mut());
+                    ptr::drop_in_place(children.next()?.half_aligned_mut());
+                }
+            })();
+        }
+    }
+}
+
 #[allow(clippy::len_without_is_empty)]
 impl Node {
     /// The kind of this node.
