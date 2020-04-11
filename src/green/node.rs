@@ -12,15 +12,16 @@ use {
 /// A nonleaf node in the immutable green tree.
 ///
 /// Nodes are crated using [`Builder::node`](crate::green::Builder::node).
-#[repr(C, align(2))] // NB: align >= 2
+#[repr(C, align(8))] // NB: align >= 8
 #[derive(Debug, Eq)]
 pub struct Node {
-    // NB: This is optimal layout, as the order is (u16, u16, u32, [usize])
+    // NB: This is optimal layout, as the order is (u16, u16, u32, [{see element.rs}])
     // SAFETY: Must be at offset 0 and accurate to trailing array length.
-    children_len: u16,
-    kind: Kind,
-    text_len: TextSize,
-    children: [Element],
+    children_len: u16,  // align 8 + 0, size 2
+    kind: Kind,         // align 8 + 2, size 2
+    text_len: TextSize, // align 8 + 4, size 4
+    // SAFETY: Must be aligned to 8
+    children: [Element], // align 8 + 0, dyn size
 }
 
 // Manually impl Eq/Hash to match Token
@@ -55,8 +56,25 @@ impl Node {
 
     /// Child elements of this node.
     pub fn children(&self) -> Children<'_> {
-        todo!()
-        // Children { inner: self.children.iter() }
+        Children { inner: self.children.iter() }
+    }
+
+    /// Child element containing the given offset from the start of this node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the given offset is outside of this node.
+    pub fn child_at_offset(
+        &self,
+        offset: TextSize,
+    ) -> NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>> {
+        assert!(offset < self.len());
+        let index = self
+            .children
+            .binary_search_by_key(&offset, |el| el.offset())
+            .unwrap_or_else(|index| index - 1);
+        let element = unsafe { self.children.get_unchecked(index) };
+        element.into()
     }
 }
 
@@ -174,13 +192,19 @@ unsafe impl SliceDst for Node {
 #[derive(Debug, Clone)]
 pub struct Children<'a> {
     inner: slice::Iter<'a, Element>,
+    // NB: Children can (and probably should) keep track of the alignment of
+    // the inner slice iterator. That way, the compiler should be able to pick
+    // up on the exclusively flip-flop pattern and optimize out checking for
+    // alignment. This is most important for internal iteration (fold), where
+    // we can guarantee this by unrolling to a two-stride manually. I've just
+    // not done this yet to avoid the extra safety-critical code initially.
 }
 
 impl<'a> Children<'a> {
     /// Get the next item in the iterator without advancing it.
     pub fn peek(&self) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
-        todo!()
-        // self.inner.as_slice().first().map(Into::into)
+        let element = self.inner.as_slice().first()?;
+        Some(element.into())
     }
 
     /// Get the nth item in the iterator without advancing it.
@@ -188,8 +212,8 @@ impl<'a> Children<'a> {
         &self,
         n: usize,
     ) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
-        todo!()
-        // self.inner.as_slice().get(n).map(Into::into)
+        let element = self.inner.as_slice().get(n)?;
+        Some(element.into())
     }
 
     /// Divide this iterator into two at an index.
@@ -201,64 +225,53 @@ impl<'a> Children<'a> {
     ///
     /// Panics if `mid > len`.
     pub fn split_at(&self, mid: usize) -> (Self, Self) {
-        todo!()
-        // let (left, right) = self.inner.as_slice().split_at(mid);
-        // (Children { inner: left.iter() }, Children { inner: right.iter() })
+        let (left, right) = self.inner.as_slice().split_at(mid);
+        (Children { inner: left.iter() }, Children { inner: right.iter() })
     }
 }
-
-// impl Children<'_> {
-//     pub(crate) fn none() -> Self {
-//         Children { inner: [].iter() }
-//     }
-// }
 
 impl<'a> Iterator for Children<'a> {
     type Item = NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
-        // self.inner.next().map(Into::into)
+        let element = self.inner.next()?;
+        Some(element.into())
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        todo!()
-        // self.inner.size_hint()
+        self.inner.size_hint()
     }
 
     fn count(self) -> usize {
-        todo!()
-        // self.inner.count()
+        self.inner.count()
     }
 
-    fn last(self) -> Option<Self::Item> {
-        todo!()
-        // self.inner.last().map(Into::into)
+    fn last(mut self) -> Option<Self::Item> {
+        self.next_back()
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        todo!()
-        // self.inner.nth(n).map(Into::into)
+        let element = self.inner.nth(n)?;
+        Some(element.into())
     }
 }
 
 impl ExactSizeIterator for Children<'_> {
     #[inline(always)]
     fn len(&self) -> usize {
-        todo!()
-        // self.inner.len()
+        self.inner.len()
     }
 }
 
 impl DoubleEndedIterator for Children<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        todo!()
-        // self.inner.next_back().map(Into::into)
+        let element = self.inner.next_back()?;
+        Some(element.into())
     }
 
     fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        todo!()
-        // self.inner.nth_back(n).map(Into::into)
+        let element = self.inner.nth_back(n)?;
+        Some(element.into())
     }
 }
 

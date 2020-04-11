@@ -220,3 +220,21 @@ impl<'a> From<&'a Element> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, To
             .unwrap()
     }
 }
+
+impl<'a> From<&'a FullAlignedElement> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>> {
+    fn from(this: &'a FullAlignedElement) -> Self {
+        let this = this.ptr();
+        None.or_else(|| this.with_a(|&node| NodeOrToken::Node(node)))
+            .or_else(|| this.with_b(|&token| NodeOrToken::Token(token)))
+            .unwrap()
+    }
+}
+
+impl<'a> From<&'a HalfAlignedElement> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>> {
+    fn from(this: &'a HalfAlignedElement) -> Self {
+        let this = this.ptr();
+        None.or_else(|| this.with_a(|&node| NodeOrToken::Node(node)))
+            .or_else(|| this.with_b(|&token| NodeOrToken::Token(token)))
+            .unwrap()
+    }
+}
