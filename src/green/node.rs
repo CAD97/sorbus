@@ -6,7 +6,7 @@ use {
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
     std::{alloc::Layout, hash, iter::FusedIterator, mem, ptr, slice},
-    text_size::LenTextSize,
+    text_size::TextLen,
 };
 
 /// A nonleaf node in the immutable green tree.
@@ -59,8 +59,8 @@ impl Node {
     }
 }
 
-impl LenTextSize for &'_ Node {
-    fn len_text_size(self) -> TextSize {
+impl TextLen for &'_ Node {
+    fn text_len(self) -> TextSize {
         self.len()
     }
 }
