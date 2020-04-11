@@ -107,6 +107,7 @@ impl Node {
         let (layout, offset_1) = layout.extend(Layout::new::<Kind>()).unwrap();
         let (layout, offset_2) = layout.extend(Layout::new::<TextSize>()).unwrap();
         let (layout, offset_3) = layout.extend(Layout::array::<Element>(len).unwrap()).unwrap();
+        let layout = layout.align_to(8).unwrap();
         (layout.pad_to_align(), [offset_0, offset_1, offset_2, offset_3])
     }
 
