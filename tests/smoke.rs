@@ -39,5 +39,10 @@ fn make_sexpr_tree() {
 
     tree.child_at_offset(5.into());
     tree.children().for_each(drop);
-    dbg!(tree);
+
+    if cfg!(miri) {
+        dbg!(tree);
+    } else {
+        insta::assert_debug_snapshot!(tree);
+    }
 }

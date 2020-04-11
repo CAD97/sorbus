@@ -24,9 +24,9 @@ use {
         ArcBorrow, NodeOrToken, TextSize,
     },
     erasable::{ErasablePtr, ErasedPtr},
-    ptr_union::{Union2, UnionBuilder},
+    ptr_union::{Union2, UnionBuilder, Enum2},
     std::{
-        fmt,
+        fmt::{self, Debug},
         hash::{self, Hash},
         ptr,
         sync::Arc,
@@ -213,9 +213,13 @@ impl Drop for HalfAlignedElement {
     }
 }
 
-impl fmt::Debug for Element {
+impl Debug for Element {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("{Element}")
+        write!(f, "(offset {:?}) ", &self.offset())?;
+        match self.ptr().unpack() {
+            Enum2::A(node) => Debug::fmt(&node, f),
+            Enum2::B(token) => Debug::fmt(&token, f),
+        }
     }
 }
 
