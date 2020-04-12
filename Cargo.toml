@@ -20,4 +20,9 @@ text-size = "0.99" # public
 # If/when hash_raw_entry is stabilized, this dependency should be removed.
 
 [dev-dependencies]
+criterion = "0.3"
 insta = "0.15"
+
+[[bench]]
+name = "node_children"
+harness = false
