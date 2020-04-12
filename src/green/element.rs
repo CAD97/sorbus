@@ -24,7 +24,7 @@ use {
         ArcBorrow, NodeOrToken, TextSize,
     },
     erasable::{ErasablePtr, ErasedPtr},
-    ptr_union::{Union2, UnionBuilder, Enum2},
+    ptr_union::{Enum2, Union2, UnionBuilder},
     std::{
         fmt::{self, Debug},
         hash::{self, Hash},
@@ -99,12 +99,18 @@ impl Element {
     }
 
     pub(super) unsafe fn full_aligned(&self) -> &FullAlignedElement {
-        debug_assert!(self.is_full_aligned());
+        debug_assert!(
+            self.is_full_aligned(),
+            "called Element::full_aligned on half-aligned element; this is UB!",
+        );
         &*(&self.full_aligned as *const FullAlignedElementRepr as *const FullAlignedElement)
     }
 
     pub(super) unsafe fn full_aligned_mut(&mut self) -> &mut FullAlignedElement {
-        debug_assert!(self.is_full_aligned());
+        debug_assert!(
+            self.is_full_aligned(),
+            "called Element::full_aligned on half-aligned element; this is UB!",
+        );
         &mut *(&mut self.full_aligned as *mut FullAlignedElementRepr as *mut FullAlignedElement)
     }
 
@@ -113,12 +119,18 @@ impl Element {
     }
 
     pub(super) unsafe fn half_aligned(&self) -> &HalfAlignedElement {
-        debug_assert!(self.is_half_aligned());
+        debug_assert!(
+            self.is_half_aligned(),
+            "called Element::half_aligned on full-aligned element; this is UB!",
+        );
         &*(&self.half_aligned as *const HalfAlignedElementRepr as *const HalfAlignedElement)
     }
 
     pub(super) unsafe fn half_aligned_mut(&mut self) -> &mut HalfAlignedElement {
-        debug_assert!(self.is_half_aligned());
+        debug_assert!(
+            self.is_half_aligned(),
+            "called Element::half_aligned on full-aligned element; this is UB!",
+        );
         &mut *(&mut self.half_aligned as *mut HalfAlignedElementRepr as *mut HalfAlignedElement)
     }
 
@@ -155,7 +167,10 @@ impl FullAlignedElement {
         element: NodeOrToken<Arc<Node>, Arc<Token>>,
         offset: TextSize,
     ) {
-        debug_assert!(ptr as usize % 8 == 0);
+        debug_assert!(
+            ptr as usize % 8 == 0,
+            "attempted to write full-aligned element to half-aligned place; this is UB!",
+        );
         let element =
             element.map(|node| ARC_UNION_PROOF.a(node), |token| ARC_UNION_PROOF.b(token)).flatten();
         let element = ErasablePtr::erase(element);
@@ -182,7 +197,10 @@ impl HalfAlignedElement {
         element: NodeOrToken<Arc<Node>, Arc<Token>>,
         offset: TextSize,
     ) {
-        debug_assert!(ptr as usize % 8 == 4);
+        debug_assert!(
+            ptr as usize % 8 == 4,
+            "attempted to write half-aligned element to full-aligned place; this is UB!",
+        );
         let element =
             element.map(|node| ARC_UNION_PROOF.a(node), |token| ARC_UNION_PROOF.b(token)).flatten();
         let element = ErasablePtr::erase(element);
@@ -196,7 +214,10 @@ impl HalfAlignedElement {
 impl Drop for FullAlignedElement {
     #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
     fn drop(&mut self) {
-        debug_assert!(self as *const _ as usize % 8 == 0);
+        debug_assert!(
+            self as *const _ as usize % 8 == 0,
+            "dropped a half-aligned element as a full-aligned element; this is UB!",
+        );
         unsafe {
             <Union2<Arc<Node>, Arc<Token>> as ErasablePtr>::unerase(*&self.repr.ptr);
         }
@@ -206,7 +227,10 @@ impl Drop for FullAlignedElement {
 impl Drop for HalfAlignedElement {
     #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
     fn drop(&mut self) {
-        debug_assert!(self as *const _ as usize % 8 == 4);
+        debug_assert!(
+            self as *const _ as usize % 8 == 4,
+            "dropped a full-aligned element as a half-aligned element; this is UB!",
+        );
         unsafe {
             <Union2<Arc<Node>, Arc<Token>> as ErasablePtr>::unerase(*&self.repr.ptr);
         }
