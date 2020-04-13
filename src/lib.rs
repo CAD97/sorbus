@@ -7,7 +7,6 @@
 //!
 //!   [rowan]: <lib.rs/rowan>
 
-#![feature(alloc_layout_extra)] // rust-lang/rust#69362, hopefully targeting 1.44
 #![forbid(unconditional_recursion)]
 #![warn(missing_debug_implementations, missing_docs)]
 
@@ -21,6 +20,7 @@ const ASSERT_TEXTSIZE_IS_U32: fn() = || {
 
 pub mod green;
 mod utils;
+mod layout_polyfill;
 
 #[doc(inline)]
 pub use crate::utils::{Kind, NodeOrToken};
