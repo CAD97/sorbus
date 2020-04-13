@@ -11,6 +11,14 @@
 #![forbid(unconditional_recursion)]
 #![warn(missing_debug_implementations, missing_docs)]
 
+#[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
+compile_error!("sorbus only works when sizeof(*const ()) is u32 or u64");
+
+#[allow(unused)]
+const ASSERT_TEXTSIZE_IS_U32: fn() = || {
+    let _ = std::mem::transmute::<u32, text_size::TextSize>;
+};
+
 pub mod green;
 mod utils;
 

@@ -1,26 +1,27 @@
 use {
     crate::{
-        green::{Element, Token},
+        green::{Element, FullAlignedElement, HalfAlignedElement, Token},
         ArcBorrow, Kind, NodeOrToken, TextSize,
     },
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{alloc::Layout, hash, iter::FusedIterator, mem, ptr, slice},
+    std::{alloc::Layout, hash, iter::FusedIterator, mem::ManuallyDrop, ptr, slice, sync::Arc},
     text_size::TextLen,
 };
 
 /// A nonleaf node in the immutable green tree.
 ///
 /// Nodes are crated using [`Builder::node`](crate::green::Builder::node).
-#[repr(C, align(2))] // NB: align >= 2
+#[repr(C, align(8))] // NB: align >= 8
 #[derive(Debug, Eq)]
 pub struct Node {
-    // NB: This is optimal layout, as the order is (u16, u16, u32, [usize])
+    // NB: This is optimal layout, as the order is (u16, u16, u32, [{see element.rs}])
     // SAFETY: Must be at offset 0 and accurate to trailing array length.
-    children_len: u16,
-    kind: Kind,
-    text_len: TextSize,
-    children: [Element],
+    children_len: u16,  // align 8 + 0, size 2
+    kind: Kind,         // align 8 + 2, size 2
+    text_len: TextSize, // align 8 + 4, size 4
+    // SAFETY: Must be aligned to 8
+    children: [Element], // align 8 + 0, dyn size
 }
 
 // Manually impl Eq/Hash to match Token
@@ -41,6 +42,21 @@ impl hash::Hash for Node {
     }
 }
 
+// Element is a union, so we have to make sure to drop them manually here.
+impl Drop for Node {
+    fn drop(&mut self) {
+        let mut children = self.children.iter_mut();
+        unsafe {
+            (|| -> Option<()> {
+                loop {
+                    ptr::drop_in_place(children.next()?.full_aligned_mut());
+                    ptr::drop_in_place(children.next()?.half_aligned_mut());
+                }
+            })();
+        }
+    }
+}
+
 #[allow(clippy::len_without_is_empty)]
 impl Node {
     /// The kind of this node.
@@ -55,7 +71,25 @@ impl Node {
 
     /// Child elements of this node.
     pub fn children(&self) -> Children<'_> {
-        Children { inner: self.children.iter() }
+        Children { inner: self.children.iter(), full_align: true }
+    }
+
+    /// Child element containing the given offset from the start of this node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the given offset is outside of this node.
+    pub fn child_at_offset(
+        &self,
+        offset: TextSize,
+    ) -> NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>> {
+        assert!(offset < self.len());
+        let index = self
+            .children
+            .binary_search_by_key(&offset, |el| el.offset())
+            .unwrap_or_else(|index| index - 1);
+        let element = unsafe { self.children.get_unchecked(index) };
+        element.into()
     }
 }
 
@@ -73,6 +107,7 @@ impl Node {
         let (layout, offset_1) = layout.extend(Layout::new::<Kind>()).unwrap();
         let (layout, offset_2) = layout.extend(Layout::new::<TextSize>()).unwrap();
         let (layout, offset_3) = layout.extend(Layout::array::<Element>(len).unwrap()).unwrap();
+        let layout = layout.align_to(8).unwrap();
         (layout.pad_to_align(), [offset_0, offset_1, offset_2, offset_3])
     }
 
@@ -80,14 +115,13 @@ impl Node {
     pub(super) fn new<A, I>(kind: Kind, children: I) -> A
     where
         A: AllocSliceDst<Self>,
-        I: IntoIterator<Item = Element>,
+        I: IntoIterator<Item = NodeOrToken<Arc<Node>, Arc<Token>>>,
         I::IntoIter: ExactSizeIterator,
     {
         let mut children = children.into_iter();
         let len = children.len();
         assert!(len <= u16::MAX as usize, "more children than fit in one node");
         let children_len = len as u16;
-        let mut text_len = TextSize::zero();
         let (layout, [children_len_offset, kind_offset, text_len_offset, children_offset]) =
             Self::layout(len);
 
@@ -98,6 +132,7 @@ impl Node {
                 struct ChildrenWriter {
                     raw: *mut Element,
                     len: usize,
+                    text_len: TextSize,
                 }
 
                 impl Drop for ChildrenWriter {
@@ -109,13 +144,23 @@ impl Node {
                 }
 
                 impl ChildrenWriter {
-                    unsafe fn push(&mut self, element: Element) {
-                        ptr::write(self.raw.add(self.len), element);
+                    fn new(raw: *mut Element) -> Self {
+                        ChildrenWriter { raw, len: 0, text_len: TextSize::zero() }
+                    }
+
+                    unsafe fn push(&mut self, element: NodeOrToken<Arc<Node>, Arc<Token>>) {
+                        let offset = self.text_len;
+                        self.text_len += element.as_deref().map(Node::len, Token::len).flatten();
+                        if self.len % 2 == 0 {
+                            FullAlignedElement::write(self.raw.add(self.len), element, offset);
+                        } else {
+                            HalfAlignedElement::write(self.raw.add(self.len), element, offset);
+                        }
                         self.len += 1;
                     }
 
-                    fn finish(self) {
-                        mem::forget(self)
+                    fn finish(self) -> TextSize {
+                        ManuallyDrop::new(self).text_len
                     }
                 }
 
@@ -124,20 +169,17 @@ impl Node {
                 ptr::write(raw.add(children_len_offset).cast(), children_len);
                 ptr::write(raw.add(kind_offset).cast(), kind);
 
-                let mut children_writer =
-                    ChildrenWriter { raw: raw.add(children_offset).cast(), len: 0 };
+                let mut children_writer = ChildrenWriter::new(raw.add(children_offset).cast());
                 for _ in 0..len {
-                    let child: Element =
+                    let child: NodeOrToken<Arc<Node>, Arc<Token>> =
                         children.next().expect("children iterator over-reported length");
-                    text_len = text_len.checked_add(child.len()).expect("TextSize overflow");
                     children_writer.push(child);
                 }
                 assert!(children.next().is_none(), "children iterator under-reported length");
 
+                let text_len = children_writer.finish();
                 ptr::write(raw.add(text_len_offset).cast(), text_len);
                 debug_assert_eq!(layout, Layout::for_value(ptr.as_ref()));
-
-                children_writer.finish()
             })
         }
     }
@@ -172,12 +214,18 @@ unsafe impl SliceDst for Node {
 #[derive(Debug, Clone)]
 pub struct Children<'a> {
     inner: slice::Iter<'a, Element>,
+    full_align: bool,
 }
 
 impl<'a> Children<'a> {
     /// Get the next item in the iterator without advancing it.
     pub fn peek(&self) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
-        self.inner.as_slice().first().map(Into::into)
+        let element = self.inner.as_slice().first()?;
+        if self.full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
     }
 
     /// Get the nth item in the iterator without advancing it.
@@ -185,7 +233,13 @@ impl<'a> Children<'a> {
         &self,
         n: usize,
     ) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
-        self.inner.as_slice().get(n).map(Into::into)
+        let element = self.inner.as_slice().get(n)?;
+        let full_align = self.full_align ^ (n % 2 == 1);
+        if full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
     }
 
     /// Divide this iterator into two at an index.
@@ -198,21 +252,27 @@ impl<'a> Children<'a> {
     /// Panics if `mid > len`.
     pub fn split_at(&self, mid: usize) -> (Self, Self) {
         let (left, right) = self.inner.as_slice().split_at(mid);
-        (Children { inner: left.iter() }, Children { inner: right.iter() })
+        let left_full_align = self.full_align;
+        let right_full_align = self.full_align ^ (mid % 2 == 1);
+        (
+            Children { inner: left.iter(), full_align: left_full_align },
+            Children { inner: right.iter(), full_align: right_full_align },
+        )
     }
 }
-
-// impl Children<'_> {
-//     pub(crate) fn none() -> Self {
-//         Children { inner: [].iter() }
-//     }
-// }
 
 impl<'a> Iterator for Children<'a> {
     type Item = NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(Into::into)
+        let element = self.inner.next()?;
+        let full_align = self.full_align;
+        self.full_align = !full_align;
+        if full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -223,12 +283,52 @@ impl<'a> Iterator for Children<'a> {
         self.inner.count()
     }
 
-    fn last(self) -> Option<Self::Item> {
-        self.inner.last().map(Into::into)
+    fn last(mut self) -> Option<Self::Item> {
+        self.next_back()
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.inner.nth(n).map(Into::into)
+        let element = self.inner.nth(n)?;
+        let full_align = self.full_align ^ (n % 2 == 1);
+        self.full_align = !full_align;
+        if full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
+    }
+
+    fn fold<B, F>(mut self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        let mut accum = init;
+
+        macro_rules! next {
+            ($aligned:ident) => {
+                if let Some(element) = self.inner.next() {
+                    unsafe { element.$aligned().into() }
+                } else {
+                    break accum;
+                }
+            };
+        }
+
+        if self.full_align {
+            loop {
+                let el = next!(full_aligned);
+                accum = f(accum, el);
+                let el = next!(half_aligned);
+                accum = f(accum, el);
+            }
+        } else {
+            loop {
+                let el = next!(half_aligned);
+                accum = f(accum, el);
+                let el = next!(full_aligned);
+                accum = f(accum, el);
+            }
+        }
     }
 }
 
@@ -241,11 +341,27 @@ impl ExactSizeIterator for Children<'_> {
 
 impl DoubleEndedIterator for Children<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.inner.next_back().map(Into::into)
+        let element = self.inner.next_back()?;
+        // self.len() is now the index of the element popped from the back
+        let full_align = self.full_align ^ (self.len() % 2 == 1);
+        // don't change self.full_align, the alignment of the head
+        if full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
     }
 
     fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        self.inner.nth_back(n).map(Into::into)
+        let element = self.inner.nth_back(n)?;
+        // self.len() is now the index of the element popped from the back
+        let full_align = self.full_align ^ (self.len() % 2 == 1);
+        // don't change self.full_align, the alignment of the head
+        if full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
     }
 }
 

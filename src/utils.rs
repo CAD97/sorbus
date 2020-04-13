@@ -1,12 +1,23 @@
 use {
     crate::prelude::{GreenNode, GreenToken},
-    std::{ops::Deref, sync::Arc},
+    std::{
+        fmt::{self, Debug},
+        ops::Deref,
+        sync::Arc,
+    },
 };
 
 /// Raw kind tag for each element in the tree.
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Kind(pub u16);
+
+/// Skip multiline, just do it inline
+impl Debug for Kind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Kind({})", self.0)
+    }
+}
 
 /// Enum wrapping either a node or a token.
 #[allow(missing_docs)]

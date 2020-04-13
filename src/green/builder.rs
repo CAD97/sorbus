@@ -1,6 +1,6 @@
 use {
     crate::{
-        green::{Element, Node, Token},
+        green::{Node, Token},
         Kind, NodeOrToken,
     },
     hashbrown::{hash_map::RawEntryMut, HashMap, HashSet},
@@ -70,18 +70,23 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Create a new builder.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Create a new node or clone a new Arc to an existing equivalent one.
     ///
     /// This checks children for identity equivalence, not structural,
     /// so it is `O(children.len())` and only caches higher-level nodes
     /// if the lower-level nodes have also been cached.
-    pub fn node<I, E>(&mut self, kind: Kind, children: I) -> Arc<Node>
+    pub fn node<I>(&mut self, kind: Kind, children: I) -> Arc<Node>
     where
-        E: Into<NodeOrToken<Arc<Node>, Arc<Token>>>,
-        I: IntoIterator<Item = E>,
+        I: IntoIterator,
+        I::Item: Into<NodeOrToken<Arc<Node>, Arc<Token>>>,
         I::IntoIter: ExactSizeIterator,
     {
-        let node = Node::new(kind, children.into_iter().map(Into::into).map(Into::into));
+        let node = Node::new(kind, children.into_iter().map(Into::into));
         self.nodes.get_or_insert(node).0.clone()
     }
 
@@ -119,7 +124,7 @@ pub struct Checkpoint(usize);
 pub struct TreeBuilder {
     cache: Builder,
     stack: Vec<(Kind, usize)>,
-    children: Vec<Element>,
+    children: Vec<NodeOrToken<Arc<Node>, Arc<Token>>>,
 }
 
 impl TreeBuilder {
@@ -140,7 +145,7 @@ impl TreeBuilder {
 
     /// Add an element to the current branch.
     pub fn add(&mut self, element: impl Into<NodeOrToken<Arc<Node>, Arc<Token>>>) -> &mut Self {
-        self.children.push(element.into().into());
+        self.children.push(element.into());
         self
     }
 
@@ -151,10 +156,10 @@ impl TreeBuilder {
     }
 
     /// Add a new node to the current branch.
-    pub fn node<I, E>(&mut self, kind: Kind, children: I) -> &mut Self
+    pub fn node<I>(&mut self, kind: Kind, children: I) -> &mut Self
     where
-        E: Into<NodeOrToken<Arc<Node>, Arc<Token>>>,
-        I: IntoIterator<Item = E>,
+        I: IntoIterator,
+        I::Item: Into<NodeOrToken<Arc<Node>, Arc<Token>>>,
         I::IntoIter: ExactSizeIterator,
     {
         let node = self.cache.node(kind, children);

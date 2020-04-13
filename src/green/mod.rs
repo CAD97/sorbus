@@ -11,4 +11,4 @@ pub use self::{
     node::{Children, Node},
     token::Token,
 };
-pub(self) use element::Element;
+pub(self) use element::{Element, FullAlignedElement, HalfAlignedElement};

@@ -1,0 +1,83 @@
+---
+source: tests/smoke.rs
+expression: tree
+---
+Node {
+    children_len: 7,
+    kind: Kind(4),
+    text_len: 15,
+    children: [
+        (offset 0) Token {
+            text_len: 1,
+            kind: Kind(1),
+            text: "(",
+        },
+        (offset 1) Token {
+            text_len: 1,
+            kind: Kind(3),
+            text: "+",
+        },
+        (offset 2) Token {
+            text_len: 1,
+            kind: Kind(0),
+            text: " ",
+        },
+        (offset 3) Node {
+            children_len: 7,
+            kind: Kind(4),
+            text_len: 8,
+            children: [
+                (offset 0) Token {
+                    text_len: 1,
+                    kind: Kind(1),
+                    text: "(",
+                },
+                (offset 1) Token {
+                    text_len: 1,
+                    kind: Kind(3),
+                    text: "*",
+                },
+                (offset 2) Token {
+                    text_len: 1,
+                    kind: Kind(0),
+                    text: " ",
+                },
+                (offset 3) Token {
+                    text_len: 2,
+                    kind: Kind(3),
+                    text: "15",
+                },
+                (offset 5) Token {
+                    text_len: 1,
+                    kind: Kind(0),
+                    text: " ",
+                },
+                (offset 6) Token {
+                    text_len: 1,
+                    kind: Kind(3),
+                    text: "2",
+                },
+                (offset 7) Token {
+                    text_len: 1,
+                    kind: Kind(2),
+                    text: ")",
+                },
+            ],
+        },
+        (offset 11) Token {
+            text_len: 1,
+            kind: Kind(0),
+            text: " ",
+        },
+        (offset 12) Token {
+            text_len: 2,
+            kind: Kind(3),
+            text: "62",
+        },
+        (offset 14) Token {
+            text_len: 1,
+            kind: Kind(2),
+            text: ")",
+        },
+    ],
+}
