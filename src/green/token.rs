@@ -1,7 +1,7 @@
 #![allow(unstable_name_collisions)] // LayoutPolyfill, be aware!
 
 use {
-    crate::{Kind, TextSize, layout_polyfill::LayoutPolyfill},
+    crate::{layout_polyfill::LayoutPolyfill, Kind, TextSize},
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
     std::{alloc::Layout, convert::TryFrom, hash, ptr},
