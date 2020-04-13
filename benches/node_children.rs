@@ -1,7 +1,6 @@
-use sorbus::NodeOrToken;
 use {
     criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput},
-    sorbus::{green, ArcBorrow, Kind},
+    sorbus::{green, ArcBorrow, Kind, NodeOrToken},
     std::sync::Arc,
 };
 

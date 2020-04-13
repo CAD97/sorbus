@@ -71,7 +71,7 @@ impl Node {
 
     /// Child elements of this node.
     pub fn children(&self) -> Children<'_> {
-        Children { inner: self.children.iter() }
+        Children { inner: self.children.iter(), full_align: true }
     }
 
     /// Child element containing the given offset from the start of this node.
@@ -214,19 +214,18 @@ unsafe impl SliceDst for Node {
 #[derive(Debug, Clone)]
 pub struct Children<'a> {
     inner: slice::Iter<'a, Element>,
-    // NB: Children can (and probably should) keep track of the alignment of
-    // the inner slice iterator. That way, the compiler should be able to pick
-    // up on the exclusively flip-flop pattern and optimize out checking for
-    // alignment. This is most important for internal iteration (fold), where
-    // we can guarantee this by unrolling to a two-stride manually. I've just
-    // not done this yet to avoid the extra safety-critical code initially.
+    full_align: bool,
 }
 
 impl<'a> Children<'a> {
     /// Get the next item in the iterator without advancing it.
     pub fn peek(&self) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
         let element = self.inner.as_slice().first()?;
-        Some(element.into())
+        if self.full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
     }
 
     /// Get the nth item in the iterator without advancing it.
@@ -235,7 +234,12 @@ impl<'a> Children<'a> {
         n: usize,
     ) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
         let element = self.inner.as_slice().get(n)?;
-        Some(element.into())
+        let full_align = self.full_align ^ (n % 2 == 1);
+        if full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
     }
 
     /// Divide this iterator into two at an index.
@@ -248,7 +252,12 @@ impl<'a> Children<'a> {
     /// Panics if `mid > len`.
     pub fn split_at(&self, mid: usize) -> (Self, Self) {
         let (left, right) = self.inner.as_slice().split_at(mid);
-        (Children { inner: left.iter() }, Children { inner: right.iter() })
+        let left_full_align = self.full_align;
+        let right_full_align = self.full_align ^ (mid % 2 == 1);
+        (
+            Children { inner: left.iter(), full_align: left_full_align },
+            Children { inner: right.iter(), full_align: right_full_align },
+        )
     }
 }
 
@@ -257,7 +266,13 @@ impl<'a> Iterator for Children<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let element = self.inner.next()?;
-        Some(element.into())
+        let full_align = self.full_align;
+        self.full_align = !full_align;
+        if full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -274,7 +289,46 @@ impl<'a> Iterator for Children<'a> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let element = self.inner.nth(n)?;
-        Some(element.into())
+        let full_align = self.full_align ^ (n % 2 == 1);
+        self.full_align = !full_align;
+        if full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
+    }
+
+    fn fold<B, F>(mut self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        let mut accum = init;
+
+        macro_rules! next {
+            ($aligned:ident) => {
+                if let Some(element) = self.inner.next() {
+                    unsafe { element.$aligned().into() }
+                } else {
+                    break accum;
+                }
+            };
+        }
+
+        if self.full_align {
+            loop {
+                let el = next!(full_aligned);
+                accum = f(accum, el);
+                let el = next!(half_aligned);
+                accum = f(accum, el);
+            }
+        } else {
+            loop {
+                let el = next!(half_aligned);
+                accum = f(accum, el);
+                let el = next!(full_aligned);
+                accum = f(accum, el);
+            }
+        }
     }
 }
 
@@ -288,12 +342,26 @@ impl ExactSizeIterator for Children<'_> {
 impl DoubleEndedIterator for Children<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let element = self.inner.next_back()?;
-        Some(element.into())
+        // self.len() is now the index of the element popped from the back
+        let full_align = self.full_align ^ (self.len() % 2 == 1);
+        // don't change self.full_align, the alignment of the head
+        if full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
     }
 
     fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
         let element = self.inner.nth_back(n)?;
-        Some(element.into())
+        // self.len() is now the index of the element popped from the back
+        let full_align = self.full_align ^ (self.len() % 2 == 1);
+        // don't change self.full_align, the alignment of the head
+        if full_align {
+            unsafe { Some(element.full_aligned().into()) }
+        } else {
+            unsafe { Some(element.half_aligned().into()) }
+        }
     }
 }
 
