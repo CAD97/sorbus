@@ -1,7 +1,9 @@
+#![allow(unstable_name_collisions)] // LayoutPolyfill, be aware!
+
 use {
     crate::{
         green::{Element, FullAlignedElement, HalfAlignedElement, Token},
-        ArcBorrow, Kind, NodeOrToken, TextSize,
+        ArcBorrow, Kind, NodeOrToken, TextSize, layout_polyfill::LayoutPolyfill
     },
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
