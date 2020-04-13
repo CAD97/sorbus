@@ -3,11 +3,14 @@
 use {
     crate::{
         green::{Element, FullAlignedElement, HalfAlignedElement, Token},
-        ArcBorrow, Kind, NodeOrToken, TextSize, layout_polyfill::LayoutPolyfill
+        layout_polyfill::LayoutPolyfill,
+        ArcBorrow, Kind, NodeOrToken, TextSize,
     },
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{alloc::Layout, hash, iter::FusedIterator, mem::ManuallyDrop, ptr, slice, sync::Arc},
+    std::{
+        alloc::Layout, hash, iter::FusedIterator, mem::ManuallyDrop, ptr, slice, sync::Arc, u16,
+    },
     text_size::TextLen,
 };
 
