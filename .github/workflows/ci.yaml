@@ -1,0 +1,106 @@
+name: CI
+on: push
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  check:
+    name: Clippy
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: clippy
+      - name: Check
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ github.token }}
+          args: --workspace --all-targets
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Toolcahin
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Check
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Toolchain
+        id: toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Cache
+        uses: actions/cache@v1
+        with:
+          path: target
+          key: rustc-${{ steps.toolchain.outputs.rustc_hash }}-tests-${{ hashFiles('**/Cargo.lock') }}
+      - name: Compile
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --workspace --all-targets --no-run
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --workspace --all-targets --no-fail-fast
+
+  miri:
+    name: Miri
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Toolchain
+        id: toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+          components: miri, rust-src
+      - name: Cache
+        uses: actions/cache@v1
+        with:
+          path: target
+          key: rustc-${{ steps.toolchain.outputs.rustc_hash }}-miri-${{ hashFiles('**/Cargo.lock') }}
+      - name: Setup
+        uses: actions-rs/cargo@v1
+        with:
+          command: miri
+          args: setup
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: miri
+          args: test

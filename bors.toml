@@ -1,0 +1,9 @@
+cut-body-after = "---"
+delete-merged-branches = true
+
+status = [
+    "Clippy",
+    "Rustfmt",
+    "Tests",
+    "Miri",
+]
