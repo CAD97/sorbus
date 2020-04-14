@@ -11,7 +11,7 @@ authors = [
 [dependencies]
 erasable = "1.1" # public
 hashbrown = "0.7"
-ptr-union = "1.2"
+ptr-union = "2.0.0-pre"
 rc-borrow = "1.1" # public
 slice-dst = "1.3" # public
 text-size = "0.99" # public

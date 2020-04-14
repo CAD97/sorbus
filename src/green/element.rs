@@ -24,7 +24,7 @@ use {
         ArcBorrow, NodeOrToken, TextSize,
     },
     erasable::{ErasablePtr, ErasedPtr},
-    ptr_union::{Enum2, Union2, UnionBuilder},
+    ptr_union::{Builder2, Enum2, Union2},
     std::{
         fmt::{self, Debug},
         hash::{self, Hash},
@@ -34,8 +34,7 @@ use {
 };
 
 // SAFETY: align of Node and Token are >= 2
-const ARC_UNION_PROOF: UnionBuilder<Union2<Arc<Node>, Arc<Token>>> =
-    unsafe { UnionBuilder::new2() };
+const ARC_UNION_PROOF: Builder2<Arc<Node>, Arc<Token>> = unsafe { Builder2::new_unchecked() };
 
 /// # Safety
 ///
