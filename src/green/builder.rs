@@ -139,8 +139,8 @@ impl TreeBuilder {
     }
 
     /// The `Builder` used to create and deduplicate nodes.
-    pub fn builder(&self) -> &Builder {
-        &self.cache
+    pub fn builder(&mut self) -> &mut Builder {
+        &mut self.cache
     }
 
     /// Add an element to the current branch.
