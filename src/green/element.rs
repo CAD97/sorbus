@@ -47,7 +47,7 @@ const ARC_UNION_PROOF: Builder2<Arc<Node>, Arc<Token>> = unsafe { Builder2::new_
 ///   - Both `.full_aligned` and `.half_aligned` alias the same implementation
 ///
 /// To avoid leaks, must be dropped via drop_in_place-ing the correct member.
-#[repr(align(4))]
+#[repr(C, align(4))]
 pub(super) union Element {
     full_aligned: FullAlignedElementRepr,
     half_aligned: HalfAlignedElementRepr,
