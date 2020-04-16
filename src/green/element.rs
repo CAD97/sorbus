@@ -13,10 +13,11 @@
 //! padding. By representing `Element` as padding-free `(usize, u32)` or
 //! `(u32, usize)` depending on alignment, we can eliminate this padding
 //! without sacrificing alignment of any member of the `Element` pair.
-
-// Yes, some of this complexity could be turned off on 32 bit platforms, as the
-// alignment requirements of usize and u32 are the same. However, it is simpler
-// to maintain the same layout algorithm on 32 bit and 64 bit platforms.
+//!
+//! On 32-bit platforms, where pointers have the same size as `TextSize`,
+//! this half-alignment trick is not required (and doesn't work). Instead,
+//! we support 32-bit platforms by silently aliasing the half aligned element
+//! to a full aligned element, because it is always fully aligned.
 
 use {
     crate::{
@@ -38,8 +39,12 @@ const ARC_UNION_PROOF: Builder2<Arc<Node>, Arc<Token>> = unsafe { Builder2::new_
 
 /// # Safety
 ///
-/// - If aligned to 8 bytes, must be `.full_aligned`
-/// - If aligned to 8 bytes + 4, must be `.half_aligned`
+/// - On a 64 bit target
+///   - If aligned to 8 bytes, must be `.full_aligned`
+///   - If aligned to 8 bytes + 4, must be `.half_aligned`
+/// - On a 32 bit target
+///   - Must always be aligned to 8 bytes, even though this strictly overaligns
+///   - Both `.full_aligned` and `.half_aligned` alias the same implementation
 ///
 /// To avoid leaks, must be dropped via drop_in_place-ing the correct member.
 #[repr(align(4))]
@@ -50,7 +55,7 @@ pub(super) union Element {
 
 /// # Safety
 ///
-/// - Must be aligned to 8 bytes (usize)
+/// - Must be aligned to 8 bytes (usize, u64)
 /// - This is only Copy because of requirements for `union`;
 ///   logically this is a `(Union2<Arc<Node>, Arc<Token>>, TextSize)`,
 ///   and must be treated as such.
@@ -63,7 +68,7 @@ struct FullAlignedElementRepr {
 
 /// # Safety
 ///
-/// Must be aligned to 8 bytes (usize).
+/// Must be aligned to 8 bytes (usize, u64).
 #[repr(transparent)]
 pub(super) struct FullAlignedElement {
     repr: FullAlignedElementRepr,
@@ -71,30 +76,44 @@ pub(super) struct FullAlignedElement {
 
 /// # Safety
 ///
-/// - Must be aligned to 8 bytes + 4 (usize + 1/2).
+/// - Must be aligned to 8 bytes + 4 (usize, u64 + 1/2).
 ///   (That is, aligned to 4 but not 8.)
 /// - This is only Copy because of requirements for `union`;
 ///   logically this is a `(Union2<Arc<Node>, Arc<Token>>, TextSize)`,
 ///   and must be treated as such.
 #[derive(Copy, Clone)] // required for union
 #[repr(C, packed)]
+#[cfg(target_pointer_width = "64")]
 struct HalfAlignedElementRepr {
     offset: TextSize,
     ptr: ErasedPtr,
 }
+
+#[cfg(target_pointer_width = "32")]
+type HalfAlignedElementRepr = FullAlignedElementRepr;
 
 /// # Safety
 ///
 /// Must be aligned to 8 bytes + 4 (usize + 1/2).
 /// (That is, aligned to 4 but not 8.)
 #[repr(transparent)]
+#[cfg(target_pointer_width = "64")]
 pub(super) struct HalfAlignedElement {
     repr: HalfAlignedElementRepr,
 }
 
+#[cfg(target_pointer_width = "32")]
+pub(super) type HalfAlignedElement = FullAlignedElement;
+
 impl Element {
+    #[cfg(target_pointer_width = "64")]
     pub(super) fn is_full_aligned(&self) -> bool {
         self as *const Self as usize % 8 == 0
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    pub(super) fn is_full_aligned(&self) -> bool {
+        true
     }
 
     pub(super) unsafe fn full_aligned(&self) -> &FullAlignedElement {
@@ -113,8 +132,14 @@ impl Element {
         &mut *(&mut self.full_aligned as *mut FullAlignedElementRepr as *mut FullAlignedElement)
     }
 
+    #[cfg(target_pointer_width = "64")]
     pub(super) fn is_half_aligned(&self) -> bool {
         self as *const Self as usize % 8 == 4
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    pub(super) fn is_half_aligned(&self) -> bool {
+        self.is_full_aligned()
     }
 
     pub(super) unsafe fn half_aligned(&self) -> &HalfAlignedElement {
@@ -180,6 +205,7 @@ impl FullAlignedElement {
     }
 }
 
+#[cfg(target_pointer_width = "64")]
 impl HalfAlignedElement {
     #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
     pub(super) fn ptr(&self) -> Union2<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>> {
@@ -223,6 +249,7 @@ impl Drop for FullAlignedElement {
     }
 }
 
+#[cfg(target_pointer_width = "64")]
 impl Drop for HalfAlignedElement {
     #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
     fn drop(&mut self) {
@@ -258,17 +285,20 @@ impl PartialEq for FullAlignedElement {
         self.ptr() == other.ptr() && self.offset() == other.offset()
     }
 }
+#[cfg(target_pointer_width = "64")]
 impl PartialEq<HalfAlignedElement> for FullAlignedElement {
     fn eq(&self, other: &HalfAlignedElement) -> bool {
         self.ptr() == other.ptr() && self.offset() == other.offset()
     }
 }
 
+#[cfg(target_pointer_width = "64")]
 impl PartialEq for HalfAlignedElement {
     fn eq(&self, other: &Self) -> bool {
         self.ptr() == other.ptr() && self.offset() == other.offset()
     }
 }
+#[cfg(target_pointer_width = "64")]
 impl PartialEq<FullAlignedElement> for HalfAlignedElement {
     fn eq(&self, other: &FullAlignedElement) -> bool {
         self.ptr() == other.ptr() && self.offset() == other.offset()
@@ -289,6 +319,7 @@ impl Hash for FullAlignedElement {
     }
 }
 
+#[cfg(target_pointer_width = "64")]
 impl Hash for HalfAlignedElement {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         self.ptr().hash(state);
@@ -314,6 +345,7 @@ impl<'a> From<&'a FullAlignedElement> for NodeOrToken<ArcBorrow<'a, Node>, ArcBo
     }
 }
 
+#[cfg(target_pointer_width = "64")]
 impl<'a> From<&'a HalfAlignedElement> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>> {
     fn from(this: &'a HalfAlignedElement) -> Self {
         let this = this.ptr();
