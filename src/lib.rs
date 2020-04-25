@@ -38,3 +38,11 @@ pub mod prelude {
         Kind, NodeOrToken,
     };
 }
+
+#[test]
+fn test_send_sync() {
+    use std::sync::Arc;
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Arc<green::Node>>();
+    assert_send_sync::<Arc<green::Token>>();
+}

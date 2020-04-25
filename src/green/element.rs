@@ -53,6 +53,16 @@ pub(super) union Element {
     half_aligned: HalfAlignedElementRepr,
 }
 
+// SAFETY: Element is logically a (Union2<Arc<Node>, Arc<Token>>, TextSize)
+// ptr-union is a private dependency, so we assert Union2 send/sync separately
+unsafe impl Send for Element {}
+unsafe impl Sync for Element {}
+
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<(Union2<Arc<Node>, Arc<Token>>, TextSize)>();
+};
+
 /// # Safety
 ///
 /// - Must be aligned to 8 bytes (usize, u64)
