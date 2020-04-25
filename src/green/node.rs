@@ -7,9 +7,11 @@ use {
         ArcBorrow, Kind, NodeOrToken, TextSize,
     },
     erasable::{Erasable, ErasedPtr},
+    ptr_union::{Enum2, Union2},
     slice_dst::{AllocSliceDst, SliceDst},
     std::{
-        alloc::Layout, hash, iter::FusedIterator, mem::ManuallyDrop, ptr, slice, sync::Arc, u16,
+        alloc::Layout, hash, iter::FusedIterator, mem, mem::ManuallyDrop, ptr, slice, sync::Arc,
+        u16,
     },
     text_size::TextLen,
 };
@@ -48,16 +50,46 @@ impl hash::Hash for Node {
 }
 
 // Element is a union, so we have to make sure to drop them manually here.
+impl Node {
+    fn drop_to(mut self: Arc<Self>, stack: &mut Vec<Union2<Arc<Node>, Arc<Token>>>) {
+        if Arc::get_mut(&mut self).is_some() {
+            unsafe {
+                // UB: https://internals.rust-lang.org/t/_/12229?u=cad97
+                let mut this: Arc<ManuallyDrop<Self>> = mem::transmute(self);
+                let this = &mut *Arc::get_mut(&mut this).unwrap();
+                let mut children = this.children.iter_mut();
+                (|| -> Option<()> {
+                    loop {
+                        stack.push(children.next()?.full_aligned_mut().take());
+                        stack.push(children.next()?.half_aligned_mut().take());
+                    }
+                })();
+            }
+        } else {
+            drop(self);
+        }
+    }
+}
+
 impl Drop for Node {
     fn drop(&mut self) {
+        let mut stack = vec![];
+
         let mut children = self.children.iter_mut();
         unsafe {
             (|| -> Option<()> {
                 loop {
-                    ptr::drop_in_place(children.next()?.full_aligned_mut());
-                    ptr::drop_in_place(children.next()?.half_aligned_mut());
+                    stack.push(children.next()?.full_aligned_mut().take());
+                    stack.push(children.next()?.half_aligned_mut().take());
                 }
             })();
+        }
+
+        while let Some(element) = stack.pop() {
+            match element.unpack() {
+                Enum2::A(node) => node.drop_to(&mut stack),
+                Enum2::B(token) => drop(token),
+            }
         }
     }
 }
