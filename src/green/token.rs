@@ -5,7 +5,6 @@ use {
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
     std::{alloc::Layout, convert::TryFrom, hash, ptr},
-    text_size::TextLen,
 };
 
 /// A leaf token in the immutable green tree.
@@ -106,11 +105,5 @@ unsafe impl SliceDst for Token {
     #[allow(clippy::cast_ptr_alignment)]
     fn retype(ptr: ptr::NonNull<[()]>) -> ptr::NonNull<Self> {
         ptr::NonNull::new(ptr.as_ptr() as *mut _).unwrap()
-    }
-}
-
-impl TextLen for &'_ Token {
-    fn text_len(self) -> TextSize {
-        self.len()
     }
 }

@@ -11,7 +11,6 @@ use {
     std::{
         alloc::Layout, hash, iter::FusedIterator, mem::ManuallyDrop, ptr, slice, sync::Arc, u16,
     },
-    text_size::TextLen,
 };
 
 /// A nonleaf node in the immutable green tree.
@@ -98,12 +97,6 @@ impl Node {
     }
 }
 
-impl TextLen for &'_ Node {
-    fn text_len(self) -> TextSize {
-        self.len()
-    }
-}
-
 #[allow(clippy::len_without_is_empty)]
 impl Node {
     // SAFETY: must accurately calculate the layout for length `len`
@@ -150,7 +143,7 @@ impl Node {
 
                 impl ChildrenWriter {
                     fn new(raw: *mut Element) -> Self {
-                        ChildrenWriter { raw, len: 0, text_len: TextSize::zero() }
+                        ChildrenWriter { raw, len: 0, text_len: 0.into() }
                     }
 
                     unsafe fn push(&mut self, element: NodeOrToken<Arc<Node>, Arc<Token>>) {
