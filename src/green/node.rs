@@ -51,29 +51,59 @@ impl hash::Hash for Node {
 // Element is a union, so we have to make sure to drop them manually here.
 impl Drop for Node {
     fn drop(&mut self) {
-        let mut stack = vec![];
+        /// Queue this node's children to be dropped if this is the last handle,
+        /// then drop the reference counted handle (freeing the node itself),
+        /// without recursing into the node's `Drop` implementation.
+        ///
+        /// Note: this is a best-effort flattening of dropping the tree.
+        /// If this function is used concurrently on two handles to the same node,
+        /// it is possible that neither will observe being the last outstanding handle
+        /// (before the synchronization in `Arc::drop`) and drop the node handle normally.
+        /// The node will still be properly dropped, just by calling its destructor
+        /// rather than taking its children into the iterative drop list.
+        fn maybe_drop_into(mut this: Arc<Node>, stack: &mut Vec<Arc<Node>>) {
+            if Arc::get_mut(&mut this).is_some() {
+                unsafe {
+                    // Skip running the node's destructor,
+                    let mut this: Arc<ManuallyDrop<Node>> =
+                        Arc::from_raw(Arc::into_raw(this) as *const _);
+                    // But queue all of the children to be destructed.
+                    drop_into(Arc::get_mut/*_unchecked*/(&mut this).unwrap(), stack)
+                }
+            } else {
+                // NB: May actually be the last Arc, if above `Arc::get_mut` races with another thread.
+                //  Thus, we only guarantee best-effort iterative drops, as some recursion may happen.
+                //  I believe if only one thread drops at a time, drops will always be fully iterative.
+                drop(this);
+            }
+        }
 
-        unsafe fn take_children(this: &mut Node, stack: &mut Vec<Union2<Arc<Node>, Arc<Token>>>) {
+        /// Queue this node's children into a drop queue.
+        ///
+        /// # Safety
+        ///
+        /// This takes the children out of the node logically but not physically,
+        /// like `ManuallyDrop::take`. The node must not be used (even to drop)
+        /// after calling this function.
+        unsafe fn drop_into(this: &mut Node, stack: &mut Vec<Arc<Node>>) {
             let mut children = this.children.iter_mut();
+            let mut enqueue = |pack: Union2<Arc<Node>, Arc<Token>>| match pack.unpack() {
+                Enum2::A(node) => stack.push(node),
+                Enum2::B(token) => drop(token),
+            };
             (|| -> Option<()> {
                 loop {
-                    stack.push(children.next()?.full_aligned_mut().take()?);
-                    stack.push(children.next()?.half_aligned_mut().take()?);
+                    enqueue(children.next()?.full_aligned_mut().take());
+                    enqueue(children.next()?.half_aligned_mut().take());
                 }
             })();
-        };
+        }
 
         unsafe {
-            take_children(self, &mut stack);
+            let mut stack = vec![];
+            drop_into(self, &mut stack);
             while let Some(element) = stack.pop() {
-                match element.unpack() {
-                    Enum2::A(mut node) => {
-                        if let Some(node) = Arc::get_mut(&mut node) {
-                            take_children(node, &mut stack);
-                        }
-                    }
-                    Enum2::B(token) => drop(token),
-                }
+                maybe_drop_into(element, &mut stack);
             }
         }
     }
