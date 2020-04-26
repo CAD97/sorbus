@@ -196,6 +196,11 @@ impl FullAlignedElement {
         unsafe { *&self.repr.offset }
     }
 
+    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
+    pub(super) unsafe fn take(&mut self) -> Union2<Arc<Node>, Arc<Token>> {
+        ErasablePtr::unerase(*&self.repr.ptr)
+    }
+
     pub(super) unsafe fn write(
         ptr: *mut Element,
         element: NodeOrToken<Arc<Node>, Arc<Token>>,
@@ -227,6 +232,11 @@ impl HalfAlignedElement {
         unsafe { *&self.repr.offset }
     }
 
+    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
+    pub(super) unsafe fn take(&mut self) -> Union2<Arc<Node>, Arc<Token>> {
+        ErasablePtr::unerase(*&self.repr.ptr)
+    }
+
     pub(super) unsafe fn write(
         ptr: *mut Element,
         element: NodeOrToken<Arc<Node>, Arc<Token>>,
@@ -243,33 +253,6 @@ impl HalfAlignedElement {
         ptr::write(ptr, offset);
         let ptr = ptr.add(1).cast();
         ptr::write(ptr, element);
-    }
-}
-
-impl Drop for FullAlignedElement {
-    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
-    fn drop(&mut self) {
-        debug_assert!(
-            self as *const _ as usize % 8 == 0,
-            "dropped a half-aligned element as a full-aligned element; this is UB!",
-        );
-        unsafe {
-            <Union2<Arc<Node>, Arc<Token>> as ErasablePtr>::unerase(*&self.repr.ptr);
-        }
-    }
-}
-
-#[cfg(target_pointer_width = "64")]
-impl Drop for HalfAlignedElement {
-    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
-    fn drop(&mut self) {
-        debug_assert!(
-            self as *const _ as usize % 8 == 4,
-            "dropped a full-aligned element as a half-aligned element; this is UB!",
-        );
-        unsafe {
-            <Union2<Arc<Node>, Arc<Token>> as ErasablePtr>::unerase(*&self.repr.ptr);
-        }
     }
 }
 
