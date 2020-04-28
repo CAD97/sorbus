@@ -4,11 +4,13 @@ mod token;
 mod node;
 mod element;
 mod builder;
+mod children;
 
 #[doc(inline)]
 pub use self::{
     builder::{Builder, Checkpoint, TreeBuilder},
-    node::{Children, Node},
+    children::{Children, ChildrenWithOffsets},
+    node::Node,
     token::Token,
 };
 pub(self) use element::{Element, FullAlignedElement, HalfAlignedElement};
