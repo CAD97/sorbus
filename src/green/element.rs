@@ -183,6 +183,16 @@ impl Element {
             unsafe { self.half_aligned().offset() }
         }
     }
+
+    pub(super) fn unpack(
+        &self,
+    ) -> (TextSize, NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>>) {
+        if self.is_full_aligned() {
+            unsafe { self.full_aligned().unpack() }
+        } else {
+            unsafe { self.half_aligned().unpack() }
+        }
+    }
 }
 
 impl FullAlignedElement {
@@ -199,6 +209,12 @@ impl FullAlignedElement {
     #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
     pub(super) unsafe fn take(&mut self) -> Union2<Arc<Node>, Arc<Token>> {
         ErasablePtr::unerase(*&self.repr.ptr)
+    }
+
+    pub(super) fn unpack(
+        &self,
+    ) -> (TextSize, NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>>) {
+        (self.offset(), self.into())
     }
 
     pub(super) unsafe fn write(
@@ -235,6 +251,12 @@ impl HalfAlignedElement {
     #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
     pub(super) unsafe fn take(&mut self) -> Union2<Arc<Node>, Arc<Token>> {
         ErasablePtr::unerase(*&self.repr.ptr)
+    }
+
+    pub(super) fn unpack(
+        &self,
+    ) -> (TextSize, NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>>) {
+        (self.offset(), self.into())
     }
 
     pub(super) unsafe fn write(
