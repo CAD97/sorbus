@@ -127,20 +127,23 @@ impl Node {
 
     /// Child element containing the given offset from the start of this node.
     ///
+    /// Returns an `(index, offset, element)` tuple.
+    ///
     /// # Panics
     ///
     /// Panics if the given offset is outside of this node.
     pub fn child_with_offset(
         &self,
         offset: TextSize,
-    ) -> (TextSize, NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>>) {
+    ) -> (usize, TextSize, NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>>) {
         assert!(offset < self.len());
         let index = self
             .children
             .binary_search_by_key(&offset, |el| el.offset())
             .unwrap_or_else(|index| index - 1);
         let element = unsafe { self.children.get_unchecked(index) };
-        element.unpack()
+        let (offset, el) = element.unpack();
+        (index, offset, el)
     }
 }
 
