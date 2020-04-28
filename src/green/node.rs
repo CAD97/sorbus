@@ -130,17 +130,17 @@ impl Node {
     /// # Panics
     ///
     /// Panics if the given offset is outside of this node.
-    pub fn child_at_offset(
+    pub fn child_with_offset(
         &self,
         offset: TextSize,
-    ) -> NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>> {
+    ) -> (TextSize, NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>>) {
         assert!(offset < self.len());
         let index = self
             .children
             .binary_search_by_key(&offset, |el| el.offset())
             .unwrap_or_else(|index| index - 1);
         let element = unsafe { self.children.get_unchecked(index) };
-        element.into()
+        element.unpack()
     }
 }
 
