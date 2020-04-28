@@ -61,10 +61,11 @@ fn make_sexpr_tree() {
         .finish();
 
     // Some random operations to make sure they work:
-    let (index, offset, el) = tree.child_with_offset(5.into());
+    let index = tree.index_of_offset(5.into());
+    let (offset, element) = tree.children().with_offsets().get(index).unwrap();
     assert_eq!(index, 3);
     assert_eq!(offset, 3.into());
-    assert!(ptr::eq(&*el.unwrap_node(), &*inner_mul));
+    assert!(ptr::eq(&*element.unwrap_node(), &*inner_mul));
     tree.children().for_each(drop);
 
     if cfg!(miri) {
@@ -123,10 +124,11 @@ fn make_math_tree() {
     let tree = right_add;
 
     // Some random operations to make sure they work:
-    let (index, offset, el) = tree.child_with_offset(5.into());
+    let index = tree.index_of_offset(5.into());
+    let (offset, element) = tree.children().with_offsets().get(index).unwrap();
     assert_eq!(index, 0);
     assert_eq!(offset, 0.into());
-    assert!(ptr::eq(&*el.unwrap_node(), &*left_add));
+    assert!(ptr::eq(&*element.unwrap_node(), &*left_add));
     tree.children().for_each(drop);
 
     if cfg!(miri) {
