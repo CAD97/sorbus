@@ -2,16 +2,14 @@
 
 use {
     crate::{
-        green::{Element, FullAlignedElement, HalfAlignedElement, Token},
+        green::{Children, Element, FullAlignedElement, HalfAlignedElement, Token},
         layout_polyfill::LayoutPolyfill,
-        ArcBorrow, Kind, NodeOrToken, TextSize,
+        Kind, NodeOrToken, TextSize,
     },
     erasable::{Erasable, ErasedPtr},
     ptr_union::{Enum2, Union2},
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{
-        alloc::Layout, hash, iter::FusedIterator, mem::ManuallyDrop, ptr, slice, sync::Arc, u16,
-    },
+    std::{alloc::Layout, hash, mem::ManuallyDrop, ptr, sync::Arc, u16},
 };
 
 /// A nonleaf node in the immutable green tree.
@@ -122,28 +120,21 @@ impl Node {
 
     /// Child elements of this node.
     pub fn children(&self) -> Children<'_> {
-        Children { inner: self.children.iter(), full_align: true }
+        unsafe { Children::new(&self.children) }
     }
 
-    /// Child element containing the given offset from the start of this node.
+    /// The index of the child that contains the given offset.
     ///
-    /// Returns an `(index, offset, element)` tuple.
+    /// If the offset is the start of a node, returns that node.
     ///
     /// # Panics
     ///
     /// Panics if the given offset is outside of this node.
-    pub fn child_with_offset(
-        &self,
-        offset: TextSize,
-    ) -> (usize, TextSize, NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>>) {
+    pub fn index_of_offset(&self, offset: TextSize) -> usize {
         assert!(offset < self.len());
-        let index = self
-            .children
+        self.children
             .binary_search_by_key(&offset, |el| el.offset())
-            .unwrap_or_else(|index| index - 1);
-        let element = unsafe { self.children.get_unchecked(index) };
-        let (offset, el) = element.unpack();
-        (index, offset, el)
+            .unwrap_or_else(|index| index - 1)
     }
 }
 
@@ -257,160 +248,3 @@ unsafe impl SliceDst for Node {
         ptr::NonNull::new(ptr.as_ptr() as *mut _).unwrap()
     }
 }
-
-/// Children elements of a node in the immutable green tree.
-#[derive(Debug, Clone)]
-pub struct Children<'a> {
-    inner: slice::Iter<'a, Element>,
-    full_align: bool,
-}
-
-impl<'a> Children<'a> {
-    /// Get the next item in the iterator without advancing it.
-    pub fn peek(&self) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
-        let element = self.inner.as_slice().first()?;
-        if self.full_align {
-            unsafe { Some(element.full_aligned().into()) }
-        } else {
-            unsafe { Some(element.half_aligned().into()) }
-        }
-    }
-
-    /// Get the nth item in the iterator without advancing it.
-    pub fn peek_n(
-        &self,
-        n: usize,
-    ) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
-        let element = self.inner.as_slice().get(n)?;
-        let full_align = self.full_align ^ (n % 2 == 1);
-        if full_align {
-            unsafe { Some(element.full_aligned().into()) }
-        } else {
-            unsafe { Some(element.half_aligned().into()) }
-        }
-    }
-
-    /// Divide this iterator into two at an index.
-    ///
-    /// The first will contain all indices from `[0, mid)`,
-    /// and the second will contain all indices from `[mid, len)`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `mid > len`.
-    pub fn split_at(&self, mid: usize) -> (Self, Self) {
-        let (left, right) = self.inner.as_slice().split_at(mid);
-        let left_full_align = self.full_align;
-        let right_full_align = self.full_align ^ (mid % 2 == 1);
-        (
-            Children { inner: left.iter(), full_align: left_full_align },
-            Children { inner: right.iter(), full_align: right_full_align },
-        )
-    }
-}
-
-impl<'a> Iterator for Children<'a> {
-    type Item = NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let element = self.inner.next()?;
-        let full_align = self.full_align;
-        self.full_align = !full_align;
-        if full_align {
-            unsafe { Some(element.full_aligned().into()) }
-        } else {
-            unsafe { Some(element.half_aligned().into()) }
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-
-    fn count(self) -> usize {
-        self.inner.count()
-    }
-
-    fn last(mut self) -> Option<Self::Item> {
-        self.next_back()
-    }
-
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let element = self.inner.nth(n)?;
-        let full_align = self.full_align ^ (n % 2 == 1);
-        self.full_align = !full_align;
-        if full_align {
-            unsafe { Some(element.full_aligned().into()) }
-        } else {
-            unsafe { Some(element.half_aligned().into()) }
-        }
-    }
-
-    fn fold<B, F>(mut self, init: B, mut f: F) -> B
-    where
-        F: FnMut(B, Self::Item) -> B,
-    {
-        let mut accum = init;
-
-        macro_rules! next {
-            ($aligned:ident) => {
-                if let Some(element) = self.inner.next() {
-                    unsafe { element.$aligned().into() }
-                } else {
-                    break accum;
-                }
-            };
-        }
-
-        if self.full_align {
-            loop {
-                let el = next!(full_aligned);
-                accum = f(accum, el);
-                let el = next!(half_aligned);
-                accum = f(accum, el);
-            }
-        } else {
-            loop {
-                let el = next!(half_aligned);
-                accum = f(accum, el);
-                let el = next!(full_aligned);
-                accum = f(accum, el);
-            }
-        }
-    }
-}
-
-impl ExactSizeIterator for Children<'_> {
-    #[inline(always)]
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-}
-
-impl DoubleEndedIterator for Children<'_> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        let element = self.inner.next_back()?;
-        // self.len() is now the index of the element popped from the back
-        let full_align = self.full_align ^ (self.len() % 2 == 1);
-        // don't change self.full_align, the alignment of the head
-        if full_align {
-            unsafe { Some(element.full_aligned().into()) }
-        } else {
-            unsafe { Some(element.half_aligned().into()) }
-        }
-    }
-
-    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        let element = self.inner.nth_back(n)?;
-        // self.len() is now the index of the element popped from the back
-        let full_align = self.full_align ^ (self.len() % 2 == 1);
-        // don't change self.full_align, the alignment of the head
-        if full_align {
-            unsafe { Some(element.full_aligned().into()) }
-        } else {
-            unsafe { Some(element.half_aligned().into()) }
-        }
-    }
-}
-
-impl FusedIterator for Children<'_> {}

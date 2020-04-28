@@ -39,35 +39,35 @@ const ARC_UNION_PROOF: Builder2<Arc<Node>, Arc<Token>> = unsafe { Builder2::new_
 
 /// # Safety
 ///
-/// - On a 64 bit target
-///   - If aligned to 8 bytes, must be `.full_aligned`
-///   - If aligned to 8 bytes + 4, must be `.half_aligned`
-/// - On a 32 bit target
-///   - Must always be aligned to 8 bytes, even though this strictly overaligns
-///   - Both `.full_aligned` and `.half_aligned` alias the same implementation
+/// - On a 64 bit target:
+///   - If aligned to 8 bytes, must be `.full_aligned`.
+///   - If aligned to 8 bytes + 4, must be `.half_aligned`.
+/// - On a 32 bit target:
+///   - Must always be aligned to 8 bytes, even though this is overaligned.
+///   - Both `.full_aligned` and `.half_aligned` alias the same implementation.
 ///
-/// To avoid leaks, must be dropped via drop_in_place-ing the correct member.
+/// To avoid leaks, the proper member must be `take`n from.
 #[repr(C, align(4))]
 pub(super) union Element {
     full_aligned: FullAlignedElementRepr,
     half_aligned: HalfAlignedElementRepr,
 }
 
-// SAFETY: Element is logically a (Union2<Arc<Node>, Arc<Token>>, TextSize)
+// SAFETY: Element is logically a (TextSize, Union2<Arc<Node>, Arc<Token>>)
 // ptr-union is a private dependency, so we assert Union2 send/sync separately
 unsafe impl Send for Element {}
 unsafe impl Sync for Element {}
 
 const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<(Union2<Arc<Node>, Arc<Token>>, TextSize)>();
+    assert_send_sync::<(TextSize, Union2<Arc<Node>, Arc<Token>>)>();
 };
 
 /// # Safety
 ///
 /// - Must be aligned to 8 bytes (usize, u64)
 /// - This is only Copy because of requirements for `union`;
-///   logically this is a `(Union2<Arc<Node>, Arc<Token>>, TextSize)`,
+///   logically this is a `(TextSize, Union2<Arc<Node>, Arc<Token>>)`,
 ///   and must be treated as such.
 #[derive(Copy, Clone)] // required for union
 #[repr(C, packed)]
@@ -89,7 +89,7 @@ pub(super) struct FullAlignedElement {
 /// - Must be aligned to 8 bytes + 4 (usize, u64 + 1/2).
 ///   (That is, aligned to 4 but not 8.)
 /// - This is only Copy because of requirements for `union`;
-///   logically this is a `(Union2<Arc<Node>, Arc<Token>>, TextSize)`,
+///   logically this is a `(TextSize, Union2<Arc<Node>, Arc<Token>>)`,
 ///   and must be treated as such.
 #[derive(Copy, Clone)] // required for union
 #[repr(C, packed)]
@@ -183,40 +183,98 @@ impl Element {
             unsafe { self.half_aligned().offset() }
         }
     }
+}
 
-    pub(super) fn unpack(
-        &self,
-    ) -> (TextSize, NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>>) {
-        if self.is_full_aligned() {
-            unsafe { self.full_aligned().unpack() }
-        } else {
-            unsafe { self.half_aligned().unpack() }
+impl Debug for Element {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(offset {:?}) ", &self.offset())?;
+        match self.ptr().unpack() {
+            Enum2::A(node) => Debug::fmt(&node, f),
+            Enum2::B(token) => Debug::fmt(&token, f),
         }
     }
 }
 
+impl Eq for Element {}
+impl PartialEq for Element {
+    fn eq(&self, other: &Self) -> bool {
+        self.ptr() == other.ptr() && self.offset() == other.offset()
+    }
+}
+
+impl Hash for Element {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        if self.is_full_aligned() {
+            unsafe { self.full_aligned().hash(state) }
+        } else {
+            unsafe { self.half_aligned().hash(state) }
+        }
+    }
+}
+
+macro_rules! impl_element {
+    ($Element:ident) => {
+        impl $Element {
+            #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
+            pub(super) fn ptr(&self) -> Union2<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>> {
+                unsafe { ErasablePtr::unerase(*&self.repr.ptr) }
+            }
+
+            #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
+            pub(super) fn offset(&self) -> TextSize {
+                unsafe { *&self.repr.offset }
+            }
+
+            #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
+            pub(super) unsafe fn take(&mut self) -> Union2<Arc<Node>, Arc<Token>> {
+                ErasablePtr::unerase(*&self.repr.ptr)
+            }
+        }
+
+        impl PartialEq<FullAlignedElement> for $Element {
+            fn eq(&self, other: &FullAlignedElement) -> bool {
+                self.ptr() == other.ptr() && self.offset() == other.offset()
+            }
+        }
+
+        #[cfg(target_pointer_width = "64")]
+        impl PartialEq<HalfAlignedElement> for $Element {
+            fn eq(&self, other: &HalfAlignedElement) -> bool {
+                self.ptr() == other.ptr() && self.offset() == other.offset()
+            }
+        }
+
+        impl Hash for $Element {
+            fn hash<H: hash::Hasher>(&self, state: &mut H) {
+                self.ptr().hash(state);
+                self.offset().hash(state);
+            }
+        }
+
+        impl<'a> From<&'a $Element> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>> {
+            fn from(this: &'a $Element) -> Self {
+                let this = this.ptr();
+                None.or_else(|| this.with_a(|&node| NodeOrToken::Node(node)))
+                    .or_else(|| this.with_b(|&token| NodeOrToken::Token(token)))
+                    .unwrap()
+            }
+        }
+
+        impl<'a> From<&'a $Element>
+            for (TextSize, NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>)
+        {
+            fn from(this: &'a $Element) -> Self {
+                (this.offset(), this.into())
+            }
+        }
+    };
+}
+
+impl_element!(FullAlignedElement);
+#[cfg(target_pointer_width = "64")]
+impl_element!(HalfAlignedElement);
+
 impl FullAlignedElement {
-    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
-    pub(super) fn ptr(&self) -> Union2<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>> {
-        unsafe { ErasablePtr::unerase(*&self.repr.ptr) }
-    }
-
-    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
-    pub(super) fn offset(&self) -> TextSize {
-        unsafe { *&self.repr.offset }
-    }
-
-    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
-    pub(super) unsafe fn take(&mut self) -> Union2<Arc<Node>, Arc<Token>> {
-        ErasablePtr::unerase(*&self.repr.ptr)
-    }
-
-    pub(super) fn unpack(
-        &self,
-    ) -> (TextSize, NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>>) {
-        (self.offset(), self.into())
-    }
-
     pub(super) unsafe fn write(
         ptr: *mut Element,
         element: NodeOrToken<Arc<Node>, Arc<Token>>,
@@ -238,27 +296,6 @@ impl FullAlignedElement {
 
 #[cfg(target_pointer_width = "64")]
 impl HalfAlignedElement {
-    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
-    pub(super) fn ptr(&self) -> Union2<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>> {
-        unsafe { ErasablePtr::unerase(*&self.repr.ptr) }
-    }
-
-    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
-    pub(super) fn offset(&self) -> TextSize {
-        unsafe { *&self.repr.offset }
-    }
-
-    #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
-    pub(super) unsafe fn take(&mut self) -> Union2<Arc<Node>, Arc<Token>> {
-        ErasablePtr::unerase(*&self.repr.ptr)
-    }
-
-    pub(super) fn unpack(
-        &self,
-    ) -> (TextSize, NodeOrToken<ArcBorrow<'_, Node>, ArcBorrow<'_, Token>>) {
-        (self.offset(), self.into())
-    }
-
     pub(super) unsafe fn write(
         ptr: *mut Element,
         element: NodeOrToken<Arc<Node>, Arc<Token>>,
@@ -278,70 +315,6 @@ impl HalfAlignedElement {
     }
 }
 
-impl Debug for Element {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(offset {:?}) ", &self.offset())?;
-        match self.ptr().unpack() {
-            Enum2::A(node) => Debug::fmt(&node, f),
-            Enum2::B(token) => Debug::fmt(&token, f),
-        }
-    }
-}
-
-impl Eq for Element {}
-impl PartialEq for Element {
-    fn eq(&self, other: &Self) -> bool {
-        self.ptr() == other.ptr() && self.offset() == other.offset()
-    }
-}
-
-impl PartialEq for FullAlignedElement {
-    fn eq(&self, other: &Self) -> bool {
-        self.ptr() == other.ptr() && self.offset() == other.offset()
-    }
-}
-#[cfg(target_pointer_width = "64")]
-impl PartialEq<HalfAlignedElement> for FullAlignedElement {
-    fn eq(&self, other: &HalfAlignedElement) -> bool {
-        self.ptr() == other.ptr() && self.offset() == other.offset()
-    }
-}
-
-#[cfg(target_pointer_width = "64")]
-impl PartialEq for HalfAlignedElement {
-    fn eq(&self, other: &Self) -> bool {
-        self.ptr() == other.ptr() && self.offset() == other.offset()
-    }
-}
-#[cfg(target_pointer_width = "64")]
-impl PartialEq<FullAlignedElement> for HalfAlignedElement {
-    fn eq(&self, other: &FullAlignedElement) -> bool {
-        self.ptr() == other.ptr() && self.offset() == other.offset()
-    }
-}
-
-impl Hash for Element {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.ptr().hash(state);
-        self.offset().hash(state);
-    }
-}
-
-impl Hash for FullAlignedElement {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.ptr().hash(state);
-        self.offset().hash(state);
-    }
-}
-
-#[cfg(target_pointer_width = "64")]
-impl Hash for HalfAlignedElement {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.ptr().hash(state);
-        self.offset().hash(state);
-    }
-}
-
 impl<'a> From<&'a Element> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>> {
     fn from(this: &'a Element) -> Self {
         let this = this.ptr();
@@ -351,21 +324,12 @@ impl<'a> From<&'a Element> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, To
     }
 }
 
-impl<'a> From<&'a FullAlignedElement> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>> {
-    fn from(this: &'a FullAlignedElement) -> Self {
-        let this = this.ptr();
-        None.or_else(|| this.with_a(|&node| NodeOrToken::Node(node)))
-            .or_else(|| this.with_b(|&token| NodeOrToken::Token(token)))
-            .unwrap()
-    }
-}
-
-#[cfg(target_pointer_width = "64")]
-impl<'a> From<&'a HalfAlignedElement> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>> {
-    fn from(this: &'a HalfAlignedElement) -> Self {
-        let this = this.ptr();
-        None.or_else(|| this.with_a(|&node| NodeOrToken::Node(node)))
-            .or_else(|| this.with_b(|&token| NodeOrToken::Token(token)))
-            .unwrap()
+impl<'a> From<&'a Element> for (TextSize, NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>) {
+    fn from(this: &'a Element) -> Self {
+        if this.is_full_aligned() {
+            unsafe { this.full_aligned().into() }
+        } else {
+            unsafe { this.half_aligned().into() }
+        }
     }
 }
