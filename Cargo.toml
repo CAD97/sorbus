@@ -9,7 +9,7 @@ authors = [
 ]
 
 [dependencies]
-erasable = "1.1" # public
+erasable = "1.2" # public
 hashbrown = "0.7"
 ptr-union = "2.0"
 rc-borrow = "1.2" # public
@@ -21,7 +21,7 @@ text-size = "1.0" # public
 
 [dev-dependencies]
 criterion = "0.3"
-insta = "0.15"
+insta = "0.16"
 
 [[bench]]
 name = "node_children"
