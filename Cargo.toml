@@ -26,10 +26,16 @@ default-features = false
 
 [features]
 ser = ["serde"]
+de = ["serde", "serde/derive"]
 
 [dev-dependencies]
 criterion = "0.3"
 insta = "0.16"
+serde_yaml = "0.8.11"
+
+[[test]]
+name = "serde"
+required-features = ["ser", "de"]
 
 [[bench]]
 name = "node_children"
