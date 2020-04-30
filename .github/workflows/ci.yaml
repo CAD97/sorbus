@@ -24,7 +24,7 @@ jobs:
         uses: actions-rs/clippy-check@v1
         with:
           token: ${{ github.token }}
-          args: --workspace --all-targets
+          args: --all-targets --all-features
 
   fmt:
     name: Rustfmt
@@ -67,12 +67,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --workspace --all-targets --no-run
+          args: --all-targets --all-features --no-run
       - name: Test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --workspace --all-targets --no-fail-fast
+          args: --all-targets --all-features --no-fail-fast
 
   miri:
     name: Miri
@@ -103,9 +103,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: miri
-          args: test --target x86_64-unknown-linux-gnu
+          args: test --all-features --target x86_64-unknown-linux-gnu
       - name: Test 32 bit target
         uses: actions-rs/cargo@v1
         with:
           command: miri
-          args: test --target i686-unknown-linux-gnu
+          args: test --all-features --target i686-unknown-linux-gnu
