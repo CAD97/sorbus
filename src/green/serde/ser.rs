@@ -32,7 +32,7 @@ impl Serialize for Node {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Token", 2)?;
+        let mut state = serializer.serialize_struct("Node", 2)?;
         state.serialize_field("kind", &self.kind())?;
         state.serialize_field("children", &Children(self))?;
         state.end()
