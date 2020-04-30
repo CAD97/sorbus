@@ -1,12 +1,9 @@
-#![allow(unstable_name_collisions)] // LayoutPolyfill, be aware!
-
 use {
     crate::{
         green::{
             unpack_node_or_token, Children, Element, FullAlignedElement, HalfAlignedElement,
             PackedNodeOrToken,
         },
-        layout_polyfill::LayoutPolyfill,
         Kind, TextSize,
     },
     erasable::{Erasable, ErasedPtr},
