@@ -567,12 +567,21 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.51"
+version = "1.0.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da07b57ee2623368351e9a0488bb0b261322a15a6e0ae53e243cbdc0f4208da9"
+checksum = "a7894c8ed05b7a3a279aeb79025fdec1d3158080b75b98a08faf2806bb799edd"
 dependencies = [
  "itoa",
  "ryu",
+ "serde",
+]
+
+[[package]]
+name = "serde_test"
+version = "1.0.106"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48f80694c19c256c75e68ef3240d078e73d7ed56e0f14300656f8b7b000f3852"
+dependencies = [
  "serde",
 ]
 
@@ -609,7 +618,8 @@ dependencies = [
  "ptr-union",
  "rc-borrow",
  "serde",
- "serde_yaml",
+ "serde_json",
+ "serde_test",
  "slice-dst",
  "text-size",
 ]
