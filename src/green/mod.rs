@@ -6,6 +6,9 @@ mod element;
 mod builder;
 mod children;
 
+#[cfg(feature = "serde")]
+mod serde;
+
 #[doc(inline)]
 pub use self::{
     builder::{Builder, Checkpoint, TreeBuilder},

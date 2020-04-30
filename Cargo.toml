@@ -19,6 +19,14 @@ text-size = "1.0" # public
 # Hashbrown is used directly only for access to std's unstable hash_raw_entry.
 # If/when hash_raw_entry is stabilized, this dependency should be removed.
 
+[dependencies.serde] # public
+version = "1.0.106"
+optional = true
+default-features = false
+
+[features]
+ser = ["serde"]
+
 [dev-dependencies]
 criterion = "0.3"
 insta = "0.16"
