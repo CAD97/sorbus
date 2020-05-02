@@ -300,12 +300,12 @@ impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
                 Data: EnumAccess<'de>,
             {
                 match data.variant()? {
-                    (Variant::Node, variant) => {
-                        Ok(NodeOrToken::Node(variant.struct_variant(&["kind", "children"], NodeSeed(self.0))?))
-                    }
-                    (Variant::Token, variant) => {
-                        Ok(NodeOrToken::Token(variant.struct_variant(&["kind", "text"], TokenSeed(self.0))?))
-                    }
+                    (Variant::Node, variant) => Ok(NodeOrToken::Node(
+                        variant.struct_variant(&["kind", "children"], NodeSeed(self.0))?,
+                    )),
+                    (Variant::Token, variant) => Ok(NodeOrToken::Token(
+                        variant.struct_variant(&["kind", "text"], TokenSeed(self.0))?,
+                    )),
                 }
             }
         }
