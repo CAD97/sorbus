@@ -129,8 +129,7 @@ impl<'de> DeserializeSeed<'de> for TokenSeed<'_> {
             Text,
         }
 
-        struct TokenVisitor<'a>(&'a mut Builder);
-        impl<'de> Visitor<'de> for TokenVisitor<'_> {
+        impl<'de> Visitor<'de> for TokenSeed<'_> {
             type Value = Arc<Token>;
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "a sorbus green token")
@@ -194,7 +193,7 @@ impl<'de> DeserializeSeed<'de> for TokenSeed<'_> {
         }
 
         const FIELDS: &[&str] = &["kind", "text"];
-        deserializer.deserialize_struct("Token", FIELDS, TokenVisitor(self.0))
+        deserializer.deserialize_struct("Token", FIELDS, self)
     }
 }
 
@@ -213,8 +212,7 @@ impl<'de> DeserializeSeed<'de> for NodeSeed<'_> {
             Children,
         }
 
-        struct NodeVisitor<'a>(&'a mut Builder);
-        impl<'de> Visitor<'de> for NodeVisitor<'_> {
+        impl<'de> Visitor<'de> for NodeSeed<'_> {
             type Value = Arc<Node>;
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "a sorbus green node")
@@ -256,7 +254,7 @@ impl<'de> DeserializeSeed<'de> for NodeSeed<'_> {
         }
 
         const FIELDS: &[&str] = &["kind", "children"];
-        deserializer.deserialize_struct("Node", FIELDS, NodeVisitor(self.0))
+        deserializer.deserialize_struct("Node", FIELDS, self)
     }
 }
 
@@ -331,15 +329,6 @@ impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
                 write!(f, "a sorbus green node or token")
             }
 
-            fn visit_seq<Seq>(self, mut seq: Seq) -> Result<Self::Value, Seq::Error>
-            where
-                Seq: SeqAccess<'de>,
-            {
-                // RON's newtype `deserialize_any`s as a single-element seq
-                seq.next_element_seed(ElementSeed(self.0))?
-                    .ok_or_else(|| Error::invalid_length(0, &self))
-            }
-
             fn visit_map<Map>(self, mut map: Map) -> Result<Self::Value, Map::Error>
             where
                 Map: MapAccess<'de>,
@@ -393,10 +382,10 @@ impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
             {
                 match data.variant()? {
                     (Variant::Node, variant) => {
-                        Ok(NodeOrToken::Node(variant.newtype_variant_seed(NodeSeed(self.0))?))
+                        Ok(NodeOrToken::Node(variant.struct_variant(&["kind", "children"], NodeSeed(self.0))?))
                     }
                     (Variant::Token, variant) => {
-                        Ok(NodeOrToken::Token(variant.newtype_variant_seed(TokenSeed(self.0))?))
+                        Ok(NodeOrToken::Token(variant.struct_variant(&["kind", "text"], TokenSeed(self.0))?))
                     }
                 }
             }

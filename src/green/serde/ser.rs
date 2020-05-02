@@ -41,21 +41,24 @@ impl Serialize for Node {
 
 struct Wrap<T>(T);
 
-impl<Node, Token> Serialize for Wrap<NodeOrToken<Node, Token>>
-where
-    Node: Serialize,
-    Token: Serialize,
-{
+impl Serialize for Wrap<NodeOrToken<&Node, &Token>> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match &self.0 {
             NodeOrToken::Node(node) => {
-                serializer.serialize_newtype_variant("NodeOrToken", 0, "Node", node)
+                let mut state = serializer.serialize_struct_variant("NodeOrToken", 0, "Node", 2)?;
+                state.serialize_field("kind", &node.kind())?;
+                state.serialize_field("children", &Children(node))?;
+                state.end()
             }
             NodeOrToken::Token(token) => {
-                serializer.serialize_newtype_variant("NodeOrToken", 1, "Token", token)
+                let mut state =
+                    serializer.serialize_struct_variant("NodeOrToken", 1, "Token", 2)?;
+                state.serialize_field("kind", &token.kind())?;
+                state.serialize_field("text", &token.text())?;
+                state.end()
             }
         }
     }
