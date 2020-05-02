@@ -1,0 +1,17 @@
+---
+source: tests/serde.rs
+expression: node
+---
+Node(
+  kind: Kind(2),
+  children: [
+    Token(
+      kind: Kind(0),
+      text: "0",
+    ),
+    Token(
+      kind: Kind(1),
+      text: "1",
+    ),
+  ],
+)

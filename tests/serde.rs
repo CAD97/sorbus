@@ -1,4 +1,5 @@
 use {
+    insta::{assert_json_snapshot, assert_ron_snapshot, assert_yaml_snapshot, with_settings},
     serde::{de::DeserializeSeed, Deserialize, Deserializer, Serialize, Serializer},
     serde_test::{assert_tokens, Token as T},
     sorbus::*,
@@ -88,4 +89,19 @@ fn tree_de_serialization() {
             T::StructEnd,
         ]
     );
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn assert_serialization_formats() {
+    let node = make_tree();
+    with_settings!({snapshot_suffix => "json"}, {
+        assert_json_snapshot!(node);
+    });
+    with_settings!({snapshot_suffix => "yaml"}, {
+        assert_yaml_snapshot!(node);
+    });
+    with_settings!({snapshot_suffix => "ron"}, {
+        assert_ron_snapshot!(node);
+    });
 }

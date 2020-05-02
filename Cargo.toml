@@ -30,7 +30,7 @@ de = ["serde", "serde/derive"]
 
 [dev-dependencies]
 criterion = "0.3"
-insta = "0.16"
+insta = { version = "0.16", features = ["ron"] }
 serde_json = "1.0.52"
 serde_test = "1.0.106"
 
