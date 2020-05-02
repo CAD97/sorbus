@@ -1,7 +1,6 @@
 use {
     serde::{de::DeserializeSeed, Deserialize, Deserializer, Serialize, Serializer},
-    serde_json::json,
-    serde_test::{assert_de_tokens, assert_tokens, Token as T, Configure},
+    serde_test::{assert_tokens, Token as T},
     sorbus::*,
     std::sync::Arc,
 };
@@ -33,21 +32,20 @@ impl<'de> Deserialize<'de> for Node {
 
 #[test]
 fn deserializes_from_format_without_zero_copy() -> serde_json::Result<()> {
-    let mut builder = green::Builder::new();
-    let json = json! {{
-        "kind": 2,
-        "children": [
-            { "kind": 0, "text": "0" },
-            { "kind": 1, "text": "1" },
-        ]
-    }};
+    let mut tree_builder = green::TreeBuilder::new();
+    let tree = make_tree_with(&mut tree_builder);
+    let value = serde_json::to_value(&tree)?;
+
     // Deserializing from Value by-move can take string ownership but not borrow the strings
-    builder.deserialize_element().deserialize(json).map(drop)
+    let deserialized = tree_builder.builder().deserialize_node().deserialize(value)?;
+
+    assert!(Arc::ptr_eq(&tree.raw, &deserialized));
+    Ok(())
 }
 
-fn make_tree() -> Node {
+fn make_tree_with(builder: &mut green::TreeBuilder) -> Node {
     #[rustfmt::skip]
-    let tree = green::TreeBuilder::new()
+    let tree = builder
         .start_node(Kind(2))
             .token(Kind(0), "0")
             .token(Kind(1), "1")
@@ -56,11 +54,15 @@ fn make_tree() -> Node {
     Node { raw: tree }
 }
 
+fn make_tree() -> Node {
+    make_tree_with(&mut green::TreeBuilder::new())
+}
+
 #[test]
 fn tree_de_serialization() {
     #[rustfmt::skip]
     assert_tokens(
-        &make_tree().readable(),
+        &make_tree(),
         &[
             T::Struct { name: "Node", len: 2 },
                 T::Str("kind"),
@@ -82,66 +84,6 @@ fn tree_de_serialization() {
                             T::Str("text"),
                                 T::Str("1"),
                         T::StructVariantEnd,
-                    T::SeqEnd,
-            T::StructEnd,
-        ]
-    );
-    #[rustfmt::skip]
-    assert_tokens(
-        &make_tree().compact(),
-        &[
-            T::Struct { name: "Node", len: 2 },
-                T::Str("kind"),
-                    T::NewtypeStruct { name: "Kind" },
-                        T::U16(2),
-                T::Str("children"),
-                    T::Seq { len: Some(2) },
-                        T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
-                            T::Str("kind"),
-                                T::NewtypeStruct { name: "Kind" },
-                                    T::U16(0),
-                            T::Str("text"),
-                                T::Str("0"),
-                        T::StructVariantEnd,
-                        T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
-                            T::Str("kind"),
-                                T::NewtypeStruct { name: "Kind" },
-                                    T::U16(1),
-                            T::Str("text"),
-                                T::Str("1"),
-                        T::StructVariantEnd,
-                    T::SeqEnd,
-            T::StructEnd,
-        ]
-    );
-}
-
-#[test]
-fn sloppy_tree_deserialization() {
-    #[rustfmt::skip]
-    assert_de_tokens(
-        &make_tree().readable(),
-        &[
-            T::Struct { name: "Node", len: 2 },
-                T::Str("kind"),
-                    T::NewtypeStruct { name: "Kind" },
-                        T::U16(2),
-                T::Str("children"),
-                    T::Seq { len: Some(2) },
-                        T::Struct { name: "Token", len: 2 },
-                            T::Str("kind"),
-                                T::NewtypeStruct { name: "Kind" },
-                                    T::U16(0),
-                            T::Str("text"),
-                                T::Str("0"),
-                        T::StructEnd,
-                        T::Struct { name: "Token", len: 2 },
-                            T::Str("kind"),
-                                T::NewtypeStruct { name: "Kind" },
-                                    T::U16(1),
-                            T::Str("text"),
-                                T::Str("1"),
-                        T::StructEnd,
                     T::SeqEnd,
             T::StructEnd,
         ]
