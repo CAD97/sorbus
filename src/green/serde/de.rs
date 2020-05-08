@@ -194,10 +194,9 @@ impl<'de> DeserializeSeed<'de> for TokenSeed<'_> {
                 }
 
                 match state {
-                    VisitState::Start => Err(Error::missing_field("kind")),
-                    VisitState::WithText(_) => Err(Error::missing_field("kind")),
-                    VisitState::WithKind(_) => Err(Error::missing_field("text")),
-                    VisitState::Finish(token) => Ok(token),
+                    Start | WithText(_) => Err(Error::missing_field("kind")),
+                    WithKind(_) => Err(Error::missing_field("text")),
+                    Finish(token) => Ok(token),
                 }
             }
         }
