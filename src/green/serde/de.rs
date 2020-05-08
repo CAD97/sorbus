@@ -8,7 +8,7 @@ use {
         Kind, NodeOrToken,
     },
     serde::{de::*, Deserialize},
-    std::{borrow::Cow, fmt, ops::Deref, sync::Arc},
+    std::{borrow::Cow, fmt, ops::Deref, str, sync::Arc},
 };
 
 /// Helper type to maybe borrow a string from the deserializer.
@@ -63,6 +63,36 @@ impl<'de> Deserialize<'de> for Str<'de> {
                 E: Error,
             {
                 Ok(Str(Cow::Owned(v)))
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                match str::from_utf8(v) {
+                    Ok(v) => Ok(Str(Cow::Owned(v.into()))),
+                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
+                }
+            }
+
+            fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                match str::from_utf8(v) {
+                    Ok(v) => Ok(Str(Cow::Borrowed(v))),
+                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
+                }
+            }
+
+            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                match String::from_utf8(v) {
+                    Ok(v) => Ok(Str(Cow::Owned(v.into()))),
+                    Err(e) => Err(Error::invalid_value(Unexpected::Bytes(&e.into_bytes()), &self)),
+                }
             }
         }
 
@@ -196,6 +226,16 @@ impl<'de> DeserializeSeed<'de> for TokenSeedKind<'_> {
                 E: Error,
             {
                 Ok(self.0.token(self.1, v))
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                match str::from_utf8(v) {
+                    Ok(v) => self.visit_str(v),
+                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
+                }
             }
         }
         deserializer.deserialize_str(TokenTextVisitor(self.0, self.1))
