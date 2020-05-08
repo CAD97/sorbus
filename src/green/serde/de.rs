@@ -125,60 +125,80 @@ impl<'de> DeserializeSeed<'de> for TokenSeed<'_> {
                 A: SeqAccess<'de>,
             {
                 let kind = seq.next_element()?.ok_or_else(|| Error::invalid_length(0, &self))?;
-
-                struct NerdSnipeToAvoidThisPotentialCopy<'a>(&'a mut Builder, Kind);
-                impl<'de> DeserializeSeed<'de> for NerdSnipeToAvoidThisPotentialCopy<'_> {
-                    type Value = Arc<Token>;
-                    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-                    where
-                        D: Deserializer<'de>,
-                    {
-                        struct TokenTextVisitor<'a>(&'a mut Builder, Kind);
-                        impl<'de, 'a> Visitor<'de> for TokenTextVisitor<'a> {
-                            type Value = Arc<Token>;
-                            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                                write!(f, "a string")
-                            }
-
-                            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-                            where
-                                E: Error,
-                            {
-                                Ok(self.0.token(self.1, v))
-                            }
-                        }
-                        deserializer.deserialize_str(TokenTextVisitor(self.0, self.1))
-                    }
-                }
-
-                seq.next_element_seed(NerdSnipeToAvoidThisPotentialCopy(self.0, kind))
-                    .transpose()
-                    .ok_or_else(|| Error::invalid_length(1, &self))?
+                let token = seq
+                    .next_element_seed(TokenSeedKind(self.0, kind))?
+                    .ok_or_else(|| Error::invalid_length(1, &self))?;
+                Ok(token)
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: MapAccess<'de>,
             {
-                let mut kind = None;
-                let mut text = None;
+                use VisitState::*;
+                enum VisitState<'de> {
+                    Start,
+                    WithKind(Kind),
+                    WithText(Str<'de>),
+                    Finish(Arc<Token>),
+                }
+
+                let mut state = Start;
                 while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Kind if kind.is_some() => Err(Error::duplicate_field("kind"))?,
-                        Field::Kind => kind = Some(map.next_value()?),
-                        Field::Text if text.is_some() => Err(Error::duplicate_field("text"))?,
-                        Field::Text => text = Some(map.next_value()?),
+                    state = match (key, state) {
+                        (Field::Kind, Start) => WithKind(map.next_value()?),
+                        (Field::Text, Start) => WithText(map.next_value()?),
+
+                        (Field::Kind, WithText(text)) => {
+                            Finish(self.0.token(map.next_value()?, &text))
+                        }
+                        (Field::Text, WithKind(kind)) => {
+                            Finish(map.next_value_seed(TokenSeedKind(self.0, kind))?)
+                        }
+
+                        (Field::Kind, WithKind(_)) => Err(Error::duplicate_field("kind"))?,
+                        (Field::Kind, Finish(_)) => Err(Error::duplicate_field("kind"))?,
+                        (Field::Text, WithText(_)) => Err(Error::duplicate_field("text"))?,
+                        (Field::Text, Finish(_)) => Err(Error::duplicate_field("text"))?,
                     }
                 }
-                let kind = kind.ok_or_else(|| Error::missing_field("kind"))?;
-                // FUTURE: eliminate this copy in the ideal case
-                let text: Str = text.ok_or_else(|| Error::missing_field("text"))?;
-                Ok(self.0.token(kind, &text))
+
+                match state {
+                    VisitState::Start => Err(Error::missing_field("kind")),
+                    VisitState::WithText(_) => Err(Error::missing_field("kind")),
+                    VisitState::WithKind(_) => Err(Error::missing_field("text")),
+                    VisitState::Finish(token) => Ok(token),
+                }
             }
         }
 
         const FIELDS: &[&str] = &["kind", "text"];
         deserializer.deserialize_struct("Token", FIELDS, self)
+    }
+}
+
+struct TokenSeedKind<'a>(&'a mut Builder, Kind);
+impl<'de> DeserializeSeed<'de> for TokenSeedKind<'_> {
+    type Value = Arc<Token>;
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct TokenTextVisitor<'a>(&'a mut Builder, Kind);
+        impl<'de, 'a> Visitor<'de> for TokenTextVisitor<'a> {
+            type Value = Arc<Token>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "a string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(self.0.token(self.1, v))
+            }
+        }
+        deserializer.deserialize_str(TokenTextVisitor(self.0, self.1))
     }
 }
 
