@@ -13,7 +13,7 @@ erasable = "1.2" # public
 hashbrown = "0.7"
 ptr-union = "2.0"
 rc-borrow = "1.2" # public
-slice-dst = "2.0" # public
+slice-dst = "1.4" # public
 text-size = "1.0" # public
 
 # Hashbrown is used directly only for access to std's unstable hash_raw_entry.
@@ -33,9 +33,6 @@ criterion = "0.3"
 insta = { version = "0.16", features = ["ron"] }
 serde_json = "1.0.52"
 serde_test = "1.0.106"
-
-[patch.crates-io]
-slice-dst = { git = "https://github.com/CAD97/pointer-utils.git", branch = "try-slice-dst" }
 
 [[test]]
 name = "serde"

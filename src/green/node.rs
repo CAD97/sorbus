@@ -8,7 +8,7 @@ use {
     },
     erasable::{Erasable, ErasedPtr},
     ptr_union::{Enum2, Union2},
-    slice_dst::{AllocSliceDst, SliceDst},
+    slice_dst::{AllocSliceDst, SliceDst, TryAllocSliceDst},
     std::{alloc::Layout, hash, mem::ManuallyDrop, ptr, sync::Arc, u16},
 };
 
@@ -138,6 +138,42 @@ impl Node {
     }
 }
 
+/// Helper for writing children during initialization of an element.
+struct ChildrenWriter {
+    raw: *mut Element,
+    len: usize,
+    text_len: TextSize,
+}
+
+impl Drop for ChildrenWriter {
+    fn drop(&mut self) {
+        unsafe {
+            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.raw, self.len));
+        }
+    }
+}
+
+impl ChildrenWriter {
+    fn new(raw: *mut Element) -> Self {
+        ChildrenWriter { raw, len: 0, text_len: 0.into() }
+    }
+
+    unsafe fn push(&mut self, element: NodeOrToken<Arc<Node>, Arc<Token>>) {
+        let offset = self.text_len;
+        self.text_len += element.as_deref().map(Node::len, Token::len).flatten();
+        if self.len % 2 == 0 {
+            FullAlignedElement::write(self.raw.add(self.len), element, offset);
+        } else {
+            HalfAlignedElement::write(self.raw.add(self.len), element, offset);
+        }
+        self.len += 1;
+    }
+
+    fn finish(self) -> TextSize {
+        ManuallyDrop::new(self).text_len
+    }
+}
+
 #[allow(clippy::len_without_is_empty)]
 impl Node {
     // SAFETY: must accurately calculate the layout for length `len`
@@ -157,18 +193,40 @@ impl Node {
         I: IntoIterator<Item = NodeOrToken<Arc<Node>, Arc<Token>>>,
         I::IntoIter: ExactSizeIterator,
     {
-        enum Void {}
-        let children = children.into_iter().map(Ok::<_, Void>);
-        match Self::try_new(kind, children) {
-            Ok(a) => a,
-            Err(void) => match void {},
+        let mut children = children.into_iter();
+        let len = children.len();
+        assert!(len <= u16::MAX as usize, "more children than fit in one node");
+        let children_len = len as u16;
+        let (layout, [children_len_offset, kind_offset, text_len_offset, children_offset]) =
+            Self::layout(len);
+
+        unsafe {
+            // SAFETY: closure fully initializes the place
+            A::new_slice_dst(len, |ptr| {
+                let raw = ptr.as_ptr().cast::<u8>();
+
+                ptr::write(raw.add(children_len_offset).cast(), children_len);
+                ptr::write(raw.add(kind_offset).cast(), kind);
+
+                let mut children_writer = ChildrenWriter::new(raw.add(children_offset).cast());
+                for _ in 0..len {
+                    let child: NodeOrToken<Arc<Node>, Arc<Token>> =
+                        children.next().expect("children iterator over-reported length");
+                    children_writer.push(child);
+                }
+                assert!(children.next().is_none(), "children iterator under-reported length");
+
+                let text_len = children_writer.finish();
+                ptr::write(raw.add(text_len_offset).cast(), text_len);
+                debug_assert_eq!(layout, Layout::for_value(ptr.as_ref()));
+            })
         }
     }
 
     #[allow(clippy::new_ret_no_self)]
     pub(super) fn try_new<A, I, E>(kind: Kind, children: I) -> Result<A, E>
     where
-        A: AllocSliceDst<Self>,
+        A: TryAllocSliceDst<Self>,
         I: IntoIterator<Item = Result<NodeOrToken<Arc<Node>, Arc<Token>>, E>>,
         I::IntoIter: ExactSizeIterator,
     {
@@ -182,42 +240,6 @@ impl Node {
         unsafe {
             // SAFETY: closure fully initializes the place
             A::try_new_slice_dst(len, |ptr| {
-                /// Helper to drop children on panic.
-                struct ChildrenWriter {
-                    raw: *mut Element,
-                    len: usize,
-                    text_len: TextSize,
-                }
-
-                impl Drop for ChildrenWriter {
-                    fn drop(&mut self) {
-                        unsafe {
-                            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.raw, self.len));
-                        }
-                    }
-                }
-
-                impl ChildrenWriter {
-                    fn new(raw: *mut Element) -> Self {
-                        ChildrenWriter { raw, len: 0, text_len: 0.into() }
-                    }
-
-                    unsafe fn push(&mut self, element: NodeOrToken<Arc<Node>, Arc<Token>>) {
-                        let offset = self.text_len;
-                        self.text_len += element.as_deref().map(Node::len, Token::len).flatten();
-                        if self.len % 2 == 0 {
-                            FullAlignedElement::write(self.raw.add(self.len), element, offset);
-                        } else {
-                            HalfAlignedElement::write(self.raw.add(self.len), element, offset);
-                        }
-                        self.len += 1;
-                    }
-
-                    fn finish(self) -> TextSize {
-                        ManuallyDrop::new(self).text_len
-                    }
-                }
-
                 let raw = ptr.as_ptr().cast::<u8>();
 
                 ptr::write(raw.add(children_len_offset).cast(), children_len);

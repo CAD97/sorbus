@@ -4,7 +4,7 @@ use {
         Kind, NodeOrToken, TextSize,
     },
     hashbrown::{hash_map::RawEntryMut, HashMap},
-    slice_dst::AllocSliceDst,
+    slice_dst::{AllocSliceDst, TryAllocSliceDst},
     std::{
         hash::{BuildHasher, Hash, Hasher},
         ptr,
@@ -17,6 +17,15 @@ struct ThinEqNode(Arc<Node>);
 
 // SAFETY: pass-through implementation
 unsafe impl AllocSliceDst<Node> for ThinEqNode {
+    unsafe fn new_slice_dst<I>(len: usize, init: I) -> Self
+    where
+        I: FnOnce(ptr::NonNull<Node>),
+    {
+        ThinEqNode(Arc::new_slice_dst(len, init))
+    }
+}
+// SAFETY: pass-through implementation
+unsafe impl TryAllocSliceDst<Node> for ThinEqNode {
     unsafe fn try_new_slice_dst<I, E>(len: usize, init: I) -> Result<Self, E>
     where
         I: FnOnce(ptr::NonNull<Node>) -> Result<(), E>,
