@@ -96,7 +96,7 @@ impl Builder {
         I::IntoIter: ExactSizeIterator,
     {
         let node = Node::new(kind, children.into_iter().map(Into::into));
-        self.nodes.raw_entry_mut().from_key(&node).or_insert(node, ()).0 .0.clone()
+        self.insert_node(node)
     }
 
     pub(super) fn node_from_vec(
