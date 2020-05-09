@@ -245,6 +245,15 @@ checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
 [[package]]
 name = "erasable"
 version = "1.2.0"
+source = "git+https://github.com/CAD97/pointer-utils.git?branch=try-slice-dst#616435e0364685abbdcce917ba32a33f93f00d62"
+dependencies = [
+ "autocfg",
+ "scopeguard",
+]
+
+[[package]]
+name = "erasable"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c18404d99ecdee16598948437ef1a18b94c74f4d3a374cd41f642626c2c57cd8"
 dependencies = [
@@ -439,7 +448,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72879a26de5e77411f27a863b96c364f67bb0c0593b8e8fe384c3336ab935c9f"
 dependencies = [
  "autocfg",
- "erasable",
+ "erasable 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "paste",
 ]
 
@@ -483,7 +492,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7bdd8c212bc511390dda00c5efc91ea7f7dcbd17d6f321d48eb6b7c3566ccbc"
 dependencies = [
  "autocfg",
- "erasable",
+ "erasable 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -620,12 +629,11 @@ dependencies = [
 
 [[package]]
 name = "slice-dst"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ac98499b6248e831d6818a8963aa8885a5854ddeb89ee569518ff6f3bf959d9"
+version = "2.0.0"
+source = "git+https://github.com/CAD97/pointer-utils.git?branch=try-slice-dst#616435e0364685abbdcce917ba32a33f93f00d62"
 dependencies = [
  "autocfg",
- "erasable",
+ "erasable 1.2.0 (git+https://github.com/CAD97/pointer-utils.git?branch=try-slice-dst)",
 ]
 
 [[package]]
@@ -633,7 +641,7 @@ name = "sorbus"
 version = "0.1.0"
 dependencies = [
  "criterion",
- "erasable",
+ "erasable 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hashbrown",
  "insta",
  "ptr-union",

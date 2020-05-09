@@ -8,7 +8,7 @@ use {
         Kind, NodeOrToken,
     },
     serde::{de::*, Deserialize},
-    std::{borrow::Cow, fmt, ops::Deref, str, sync::Arc},
+    std::{borrow::Cow, fmt, marker::PhantomData, ops::Deref, str, sync::Arc},
 };
 
 /// Helper type to maybe borrow a string from the deserializer.
@@ -266,33 +266,52 @@ impl<'de> DeserializeSeed<'de> for NodeSeed<'_> {
                 Seq: SeqAccess<'de>,
             {
                 let kind = seq.next_element()?.ok_or_else(|| Error::invalid_length(0, &self))?;
-                let children = seq
-                    .next_element_seed(NodeChildrenSeed(self.0))?
+                let node = seq
+                    .next_element_seed(NodeSeedKind(self.0, kind))?
                     .ok_or_else(|| Error::invalid_length(1, &self))?;
-                Ok(self.0.node(kind, children))
+                Ok(node)
             }
 
             fn visit_map<Map>(self, mut map: Map) -> Result<Self::Value, Map::Error>
             where
                 Map: MapAccess<'de>,
             {
-                let mut kind = None;
-                let mut children = None;
+                use VisitState::*;
+                enum VisitState {
+                    Start,
+                    WithKind(Kind),
+                    WithChildren(Vec<NodeOrToken<Arc<Node>, Arc<Token>>>),
+                    Finish(Arc<Node>),
+                }
+
+                let mut state = Start;
                 while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Kind if kind.is_some() => Err(Error::duplicate_field("kind"))?,
-                        Field::Kind => kind = Some(map.next_value()?),
-                        Field::Children if children.is_some() => {
-                            Err(Error::duplicate_field("children"))?
+                    state = match (key, state) {
+                        (Field::Kind, Start) => WithKind(map.next_value()?),
+                        (Field::Children, Start) => {
+                            WithChildren(map.next_value_seed(NodeChildrenSeed(self.0))?)
                         }
-                        Field::Children => {
-                            children = Some(map.next_value_seed(NodeChildrenSeed(self.0))?)
+
+                        (Field::Kind, WithChildren(children)) => {
+                            Finish(self.0.node(map.next_value()?, children))
+                        }
+                        (Field::Children, WithKind(kind)) => {
+                            Finish(map.next_value_seed(NodeSeedKind(self.0, kind))?)
+                        }
+
+                        (Field::Kind, WithKind(_)) => Err(Error::duplicate_field("kind"))?,
+                        (Field::Kind, Finish(_)) => Err(Error::duplicate_field("kind"))?,
+                        (Field::Children, WithChildren(_)) | (Field::Children, Finish(_)) => {
+                            Err(Error::duplicate_field("children"))?
                         }
                     }
                 }
-                let kind = kind.ok_or_else(|| Error::missing_field("kind"))?;
-                let children = children.ok_or_else(|| Error::missing_field("text"))?;
-                Ok(self.0.node(kind, children))
+
+                match state {
+                    Start | WithChildren(_) => Err(Error::missing_field("kind")),
+                    WithKind(_) => Err(Error::missing_field("children")),
+                    Finish(node) => Ok(node),
+                }
             }
         }
 
@@ -301,7 +320,58 @@ impl<'de> DeserializeSeed<'de> for NodeSeed<'_> {
     }
 }
 
-// FUTURE: Maybe construct the node in place for sequences of known length
+struct NodeSeedKind<'a>(&'a mut Builder, Kind);
+impl<'de> DeserializeSeed<'de> for NodeSeedKind<'_> {
+    type Value = Arc<Node>;
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(self)
+    }
+}
+impl<'de> Visitor<'de> for NodeSeedKind<'_> {
+    type Value = Arc<Node>;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "a sequence of sorbus green elements")
+    }
+
+    fn visit_seq<Seq>(self, seq: Seq) -> Result<Self::Value, Seq::Error>
+    where
+        Seq: SeqAccess<'de>,
+    {
+        if seq.size_hint().is_some() {
+            struct SeqAccessIterator<'a, 'de, Seq: SeqAccess<'de>>(
+                &'a mut Builder,
+                Seq,
+                PhantomData<&'de ()>,
+            );
+            impl<'de, Seq: SeqAccess<'de>> Iterator for SeqAccessIterator<'_, 'de, Seq> {
+                type Item = Result<NodeOrToken<Arc<Node>, Arc<Token>>, Seq::Error>;
+                fn next(&mut self) -> Option<Self::Item> {
+                    self.1.next_element_seed(ElementSeed(self.0)).transpose()
+                }
+
+                fn size_hint(&self) -> (usize, Option<usize>) {
+                    let len = self.len();
+                    (len, Some(len))
+                }
+            }
+            impl<'de, Seq: SeqAccess<'de>> ExactSizeIterator for SeqAccessIterator<'_, 'de, Seq> {
+                fn len(&self) -> usize {
+                    self.1.size_hint().unwrap()
+                }
+            }
+
+            let node = Node::try_new(self.1, SeqAccessIterator(self.0, seq, PhantomData))?;
+            Ok(self.0.insert_node(node))
+        } else {
+            let children = NodeChildrenSeed(self.0).visit_seq(seq)?;
+            Ok(self.0.node(self.1, children))
+        }
+    }
+}
+
 struct NodeChildrenSeed<'a>(&'a mut Builder);
 impl<'de> DeserializeSeed<'de> for NodeChildrenSeed<'_> {
     type Value = Vec<NodeOrToken<Arc<Node>, Arc<Token>>>;

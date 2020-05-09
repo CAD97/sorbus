@@ -17,11 +17,11 @@ struct ThinEqNode(Arc<Node>);
 
 // SAFETY: pass-through implementation
 unsafe impl AllocSliceDst<Node> for ThinEqNode {
-    unsafe fn new_slice_dst<I>(len: usize, init: I) -> Self
+    unsafe fn try_new_slice_dst<I, E>(len: usize, init: I) -> Result<Self, E>
     where
-        I: FnOnce(ptr::NonNull<Node>),
+        I: FnOnce(ptr::NonNull<Node>) -> Result<(), E>,
     {
-        ThinEqNode(Arc::new_slice_dst(len, init))
+        Arc::try_new_slice_dst(len, init).map(ThinEqNode)
     }
 }
 
@@ -87,6 +87,11 @@ impl Builder {
         I::IntoIter: ExactSizeIterator,
     {
         let node = Node::new(kind, children.into_iter().map(Into::into));
+        self.nodes.get_or_insert(node).0.clone()
+    }
+
+    pub(super) fn insert_node(&mut self, node: Arc<Node>) -> Arc<Node> {
+        let node = ThinEqNode(node);
         self.nodes.get_or_insert(node).0.clone()
     }
 
