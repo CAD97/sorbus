@@ -90,7 +90,7 @@ impl<'de> Deserialize<'de> for Str<'de> {
                 E: Error,
             {
                 match String::from_utf8(v) {
-                    Ok(v) => Ok(Str(Cow::Owned(v.into()))),
+                    Ok(v) => Ok(Str(Cow::Owned(v))),
                     Err(e) => Err(Error::invalid_value(Unexpected::Bytes(&e.into_bytes()), &self)),
                 }
             }
@@ -213,31 +213,30 @@ impl<'de> DeserializeSeed<'de> for TokenSeedKind<'_> {
     where
         D: Deserializer<'de>,
     {
-        struct TokenTextVisitor<'a>(&'a mut Builder, Kind);
-        impl<'de, 'a> Visitor<'de> for TokenTextVisitor<'a> {
-            type Value = Arc<Token>;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "a string")
-            }
+        deserializer.deserialize_str(self)
+    }
+}
+impl<'de> Visitor<'de> for TokenSeedKind<'_> {
+    type Value = Arc<Token>;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "a string")
+    }
 
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                Ok(self.0.token(self.1, v))
-            }
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        Ok(self.0.token(self.1, v))
+    }
 
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                match str::from_utf8(v) {
-                    Ok(v) => self.visit_str(v),
-                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
-                }
-            }
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        match str::from_utf8(v) {
+            Ok(v) => self.visit_str(v),
+            Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
         }
-        deserializer.deserialize_str(TokenTextVisitor(self.0, self.1))
     }
 }
 
