@@ -487,6 +487,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc-box"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91350e0c4ea618cac2f50de63b5985aab247cf49c909df178d61386b375a41fa"
+dependencies = [
+ "erasable",
+ "slice-dst",
+]
+
+[[package]]
 name = "regex"
 version = "1.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -638,6 +648,7 @@ dependencies = [
  "insta",
  "ptr-union",
  "rc-borrow",
+ "rc-box",
  "serde",
  "serde_json",
  "serde_test",

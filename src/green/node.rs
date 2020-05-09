@@ -108,6 +108,10 @@ impl Drop for Node {
 
 #[allow(clippy::len_without_is_empty)]
 impl Node {
+    pub(super) fn set_kind(&mut self, kind: Kind) {
+        self.kind = kind;
+    }
+
     /// The kind of this node.
     pub fn kind(&self) -> Kind {
         self.kind

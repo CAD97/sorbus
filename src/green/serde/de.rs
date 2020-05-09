@@ -7,6 +7,7 @@ use {
         green::{Builder, Node, Token},
         Kind, NodeOrToken,
     },
+    rc_box::ArcBox,
     serde::{de::*, Deserialize},
     std::{borrow::Cow, fmt, marker::PhantomData, ops::Deref, str, sync::Arc},
 };
@@ -280,7 +281,7 @@ impl<'de> DeserializeSeed<'de> for NodeSeed<'_> {
                 enum VisitState {
                     Start,
                     WithKind(Kind),
-                    WithChildren(Vec<NodeOrToken<Arc<Node>, Arc<Token>>>),
+                    WithChildren(ArcBox<Node>),
                     Finish(Arc<Node>),
                 }
 
@@ -292,8 +293,9 @@ impl<'de> DeserializeSeed<'de> for NodeSeed<'_> {
                             WithChildren(map.next_value_seed(NodeChildrenSeed(self.0))?)
                         }
 
-                        (Field::Kind, WithChildren(children)) => {
-                            Finish(self.0.node_from_vec(map.next_value()?, children))
+                        (Field::Kind, WithChildren(mut node)) => {
+                            node.set_kind(map.next_value()?);
+                            Finish(self.0.cache_node(node.into()))
                         }
                         (Field::Children, WithKind(kind)) => {
                             Finish(map.next_value_seed(NodeSeedKind(self.0, kind))?)
@@ -327,26 +329,41 @@ impl<'de> DeserializeSeed<'de> for NodeSeedKind<'_> {
     where
         D: Deserializer<'de>,
     {
+        let mut node = NodeChildrenSeed(self.0).deserialize(deserializer)?;
+        node.set_kind(self.1);
+        Ok(self.0.cache_node(node.into()))
+    }
+}
+
+/// Deserialize node children without knowing the kind.
+/// Uses a kind of `Kind(0)`; fix it and then dedupe the node!
+struct NodeChildrenSeed<'a>(&'a mut Builder);
+impl<'de> DeserializeSeed<'de> for NodeChildrenSeed<'_> {
+    type Value = ArcBox<Node>;
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
         deserializer.deserialize_seq(self)
     }
 }
-impl<'de> Visitor<'de> for NodeSeedKind<'_> {
-    type Value = Arc<Node>;
+impl<'de> Visitor<'de> for NodeChildrenSeed<'_> {
+    type Value = ArcBox<Node>;
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "a sequence of sorbus green elements")
     }
 
-    fn visit_seq<Seq>(self, seq: Seq) -> Result<Self::Value, Seq::Error>
+    fn visit_seq<Seq>(self, mut seq: Seq) -> Result<Self::Value, Seq::Error>
     where
         Seq: SeqAccess<'de>,
     {
         if seq.size_hint().is_some() {
-            struct SeqAccessIterator<'a, 'de, Seq: SeqAccess<'de>>(
+            struct SeqAccessExactSizeIterator<'a, 'de, Seq: SeqAccess<'de>>(
                 &'a mut Builder,
                 Seq,
                 PhantomData<&'de ()>,
             );
-            impl<'de, Seq: SeqAccess<'de>> Iterator for SeqAccessIterator<'_, 'de, Seq> {
+            impl<'de, Seq: SeqAccess<'de>> Iterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
                 type Item = Result<NodeOrToken<Arc<Node>, Arc<Token>>, Seq::Error>;
                 fn next(&mut self) -> Option<Self::Item> {
                     self.1.next_element_seed(ElementSeed(self.0)).transpose()
@@ -357,47 +374,22 @@ impl<'de> Visitor<'de> for NodeSeedKind<'_> {
                     (len, Some(len))
                 }
             }
-            impl<'de, Seq: SeqAccess<'de>> ExactSizeIterator for SeqAccessIterator<'_, 'de, Seq> {
+            impl<'de, Seq: SeqAccess<'de>> ExactSizeIterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
                 fn len(&self) -> usize {
                     self.1.size_hint().unwrap()
                 }
             }
 
-            let node = Node::try_new(self.1, SeqAccessIterator(self.0, seq, PhantomData))?;
-            Ok(self.0.insert_node(node))
+            let node =
+                Node::try_new(Kind(0), SeqAccessExactSizeIterator(self.0, seq, PhantomData))?;
+            Ok(node)
         } else {
-            let children = NodeChildrenSeed(self.0).visit_seq(seq)?;
-            Ok(self.0.node_from_vec(self.1, children))
+            let mut children = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            while let Some(element) = seq.next_element_seed(ElementSeed(self.0))? {
+                children.push(element);
+            }
+            Ok(Node::new(Kind(0), children))
         }
-    }
-}
-
-struct NodeChildrenSeed<'a>(&'a mut Builder);
-impl<'de> DeserializeSeed<'de> for NodeChildrenSeed<'_> {
-    type Value = Vec<NodeOrToken<Arc<Node>, Arc<Token>>>;
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_seq(self)
-    }
-}
-impl<'de> Visitor<'de> for NodeChildrenSeed<'_> {
-    type Value = Vec<NodeOrToken<Arc<Node>, Arc<Token>>>;
-    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "a sequence of sorbus green elements")
-    }
-
-    fn visit_seq<Seq>(self, mut seq: Seq) -> Result<Self::Value, Seq::Error>
-    where
-        Seq: SeqAccess<'de>,
-    {
-        let mut v =
-            if let Some(size) = seq.size_hint() { Vec::with_capacity(size) } else { Vec::new() };
-        while let Some(element) = seq.next_element_seed(ElementSeed(self.0))? {
-            v.push(element);
-        }
-        Ok(v)
     }
 }
 

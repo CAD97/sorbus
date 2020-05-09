@@ -13,6 +13,7 @@ erasable = "1.2" # public
 hashbrown = "0.7"
 ptr-union = "2.0"
 rc-borrow = "1.2" # public
+rc-box = { version = "1.0", features = ["slice-dst"] }
 slice-dst = "1.4" # public
 text-size = "1.0" # public
 
