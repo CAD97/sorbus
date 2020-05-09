@@ -3,7 +3,7 @@ use {
     serde::{de::DeserializeSeed, Deserialize, Deserializer, Serialize, Serializer},
     serde_test::{assert_tokens, Token as T},
     sorbus::*,
-    std::sync::Arc,
+    std::{ptr, sync::Arc},
 };
 
 /// `green::Node` wrapper that implements Deserialize without DeserializeSeed
@@ -104,4 +104,47 @@ fn assert_serialization_formats() {
     with_settings!({snapshot_suffix => "ron"}, {
         assert_ron_snapshot!(node);
     });
+}
+
+#[test]
+fn deduplication_of_nodes_happens() {
+    let tree_json = r##"{
+        "kind": 2,
+        "children": [
+            {"Node":{
+                "kind": 1,
+                "children": [
+                    {"Token":{
+                        "kind": 0,
+                        "text": " "
+                    }}
+                ]
+            }},
+            {"Node":{
+                "kind": 1,
+                "children": [
+                    {"Token":{
+                        "kind": 0,
+                        "text": " "
+                    }}
+                ]
+            }}
+        ]
+    }"##;
+
+    // without SeqAccess::size_hint
+    let node: Node = serde_json::from_str(tree_json).unwrap();
+    let mut children = node.raw.children();
+    assert!(ptr::eq(
+        &*children.next().unwrap().unwrap_node(),
+        &*children.next().unwrap().unwrap_node()
+    ));
+
+    // with SeqAccess::size_hint
+    let node: Node = serde_json::from_value(tree_json.parse().unwrap()).unwrap();
+    let mut children = node.raw.children();
+    assert!(ptr::eq(
+        &*children.next().unwrap().unwrap_node(),
+        &*children.next().unwrap().unwrap_node()
+    ));
 }

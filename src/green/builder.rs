@@ -1,9 +1,9 @@
 use {
     crate::{
         green::{Node, Token},
-        Kind, NodeOrToken,
+        Kind, NodeOrToken, TextSize,
     },
-    hashbrown::{hash_map::RawEntryMut, HashMap, HashSet},
+    hashbrown::{hash_map::RawEntryMut, HashMap},
     slice_dst::AllocSliceDst,
     std::{
         hash::{BuildHasher, Hash, Hasher},
@@ -65,7 +65,7 @@ impl Hash for ThinEqNode {
 /// despite their distribution throughout the source code.
 #[derive(Debug, Default, Clone)]
 pub struct Builder {
-    nodes: HashSet<ThinEqNode>,
+    nodes: HashMap<ThinEqNode, ()>,
     tokens: HashMap<Arc<Token>, ()>,
 }
 
@@ -87,12 +87,49 @@ impl Builder {
         I::IntoIter: ExactSizeIterator,
     {
         let node = Node::new(kind, children.into_iter().map(Into::into));
-        self.nodes.get_or_insert(node).0.clone()
+        self.nodes.raw_entry_mut().from_key(&node).or_insert(node, ()).0 .0.clone()
+    }
+
+    pub(super) fn node_from_vec(
+        &mut self,
+        kind: Kind,
+        children: Vec<NodeOrToken<Arc<Node>, Arc<Token>>>,
+    ) -> Arc<Node> {
+        let text_len: TextSize =
+            children.iter().map(|el| el.as_deref().map(Node::len, Token::len).flatten()).sum();
+        let hash = {
+            // spoof the hash
+            let mut h = self.nodes.hasher().build_hasher();
+            kind.hash(&mut h);
+            text_len.hash(&mut h);
+            for child in &children {
+                match child {
+                    NodeOrToken::Node(node) => ptr::hash(&*node, &mut h),
+                    NodeOrToken::Token(token) => token.hash(&mut h),
+                }
+            }
+            h.finish()
+        };
+        self.nodes
+            .raw_entry_mut()
+            .from_hash(hash, |node| {
+                node.0.kind() == kind
+                    && node.0.len() == text_len
+                    && node.0.children().zip(children.iter()).all(|pair| match pair {
+                        (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &**rhs),
+                        (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => lhs == *rhs,
+                        _ => false,
+                    })
+            })
+            .or_insert_with(|| (Node::new(kind, children), ()))
+            .0
+             .0
+            .clone()
     }
 
     pub(super) fn insert_node(&mut self, node: Arc<Node>) -> Arc<Node> {
         let node = ThinEqNode(node);
-        self.nodes.get_or_insert(node).0.clone()
+        self.nodes.raw_entry_mut().from_key(&node).or_insert(node, ()).0 .0.clone()
     }
 
     /// Create a new token or clone a new Arc to an existing equivalent one.

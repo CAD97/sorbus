@@ -293,7 +293,7 @@ impl<'de> DeserializeSeed<'de> for NodeSeed<'_> {
                         }
 
                         (Field::Kind, WithChildren(children)) => {
-                            Finish(self.0.node(map.next_value()?, children))
+                            Finish(self.0.node_from_vec(map.next_value()?, children))
                         }
                         (Field::Children, WithKind(kind)) => {
                             Finish(map.next_value_seed(NodeSeedKind(self.0, kind))?)
@@ -367,7 +367,7 @@ impl<'de> Visitor<'de> for NodeSeedKind<'_> {
             Ok(self.0.insert_node(node))
         } else {
             let children = NodeChildrenSeed(self.0).visit_seq(seq)?;
-            Ok(self.0.node(self.1, children))
+            Ok(self.0.node_from_vec(self.1, children))
         }
     }
 }
