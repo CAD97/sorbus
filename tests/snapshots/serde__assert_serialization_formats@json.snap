@@ -1,0 +1,21 @@
+---
+source: tests/serde.rs
+expression: node
+---
+{
+  "kind": 2,
+  "children": [
+    {
+      "Token": {
+        "kind": 0,
+        "text": "0"
+      }
+    },
+    {
+      "Token": {
+        "kind": 1,
+        "text": "1"
+      }
+    }
+  ]
+}

@@ -4,7 +4,6 @@ use {
         Kind, NodeOrToken,
     },
     hashbrown::{hash_map::RawEntryMut, HashMap, HashSet},
-    slice_dst::AllocSliceDst,
     std::{
         hash::{BuildHasher, Hash, Hasher},
         ptr,
@@ -14,16 +13,6 @@ use {
 
 #[derive(Debug, Clone)]
 struct ThinEqNode(Arc<Node>);
-
-// SAFETY: pass-through implementation
-unsafe impl AllocSliceDst<Node> for ThinEqNode {
-    unsafe fn new_slice_dst<I>(len: usize, init: I) -> Self
-    where
-        I: FnOnce(ptr::NonNull<Node>),
-    {
-        ThinEqNode(Arc::new_slice_dst(len, init))
-    }
-}
 
 impl From<Arc<Node>> for ThinEqNode {
     fn from(this: Arc<Node>) -> Self {
@@ -87,6 +76,15 @@ impl Builder {
         I::IntoIter: ExactSizeIterator,
     {
         let node = Node::new(kind, children.into_iter().map(Into::into));
+        self.cache_node(node)
+    }
+
+    /// Get a cached version of the input node.
+    ///
+    /// If the node is new to this cache, store it and return a clone.
+    /// If it's already in the cache, return a clone of the cached version.
+    pub(super) fn cache_node(&mut self, node: Arc<Node>) -> Arc<Node> {
+        let node = ThinEqNode(node);
         self.nodes.get_or_insert(node).0.clone()
     }
 
