@@ -138,6 +138,31 @@ impl<'de> DeserializeSeed<'de> for TokenSeed<'_> {
     where
         D: Deserializer<'de>,
     {
+        const FIELDS: &[&str] = &["kind", "text"];
+        deserializer.deserialize_struct("Token", FIELDS, self)
+    }
+}
+impl<'de> Visitor<'de> for TokenSeed<'_> {
+    type Value = Arc<Token>;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "a sorbus green token")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let kind = seq.next_element()?.ok_or_else(|| Error::invalid_length(0, &self))?;
+        let token = seq
+            .next_element_seed(TokenSeedKind(self.0, kind))?
+            .ok_or_else(|| Error::invalid_length(1, &self))?;
+        Ok(token)
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
         #[derive(Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
@@ -145,65 +170,37 @@ impl<'de> DeserializeSeed<'de> for TokenSeed<'_> {
             Text,
         }
 
-        impl<'de> Visitor<'de> for TokenSeed<'_> {
-            type Value = Arc<Token>;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "a sorbus green token")
-            }
+        use VisitState::*;
+        enum VisitState<'de> {
+            Start,
+            WithKind(Kind),
+            WithText(Str<'de>),
+            Finish(Arc<Token>),
+        }
 
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                let kind = seq.next_element()?.ok_or_else(|| Error::invalid_length(0, &self))?;
-                let token = seq
-                    .next_element_seed(TokenSeedKind(self.0, kind))?
-                    .ok_or_else(|| Error::invalid_length(1, &self))?;
-                Ok(token)
-            }
+        let mut state = Start;
+        while let Some(key) = map.next_key()? {
+            state = match (key, state) {
+                (Field::Kind, Start) => WithKind(map.next_value()?),
+                (Field::Text, Start) => WithText(map.next_value()?),
 
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                use VisitState::*;
-                enum VisitState<'de> {
-                    Start,
-                    WithKind(Kind),
-                    WithText(Str<'de>),
-                    Finish(Arc<Token>),
+                (Field::Kind, WithText(text)) => Finish(self.0.token(map.next_value()?, &text)),
+                (Field::Text, WithKind(kind)) => {
+                    Finish(map.next_value_seed(TokenSeedKind(self.0, kind))?)
                 }
 
-                let mut state = Start;
-                while let Some(key) = map.next_key()? {
-                    state = match (key, state) {
-                        (Field::Kind, Start) => WithKind(map.next_value()?),
-                        (Field::Text, Start) => WithText(map.next_value()?),
-
-                        (Field::Kind, WithText(text)) => {
-                            Finish(self.0.token(map.next_value()?, &text))
-                        }
-                        (Field::Text, WithKind(kind)) => {
-                            Finish(map.next_value_seed(TokenSeedKind(self.0, kind))?)
-                        }
-
-                        (Field::Kind, WithKind(_)) => Err(Error::duplicate_field("kind"))?,
-                        (Field::Kind, Finish(_)) => Err(Error::duplicate_field("kind"))?,
-                        (Field::Text, WithText(_)) => Err(Error::duplicate_field("text"))?,
-                        (Field::Text, Finish(_)) => Err(Error::duplicate_field("text"))?,
-                    }
-                }
-
-                match state {
-                    Start | WithText(_) => Err(Error::missing_field("kind")),
-                    WithKind(_) => Err(Error::missing_field("text")),
-                    Finish(token) => Ok(token),
-                }
+                (Field::Kind, WithKind(_)) => Err(Error::duplicate_field("kind"))?,
+                (Field::Kind, Finish(_)) => Err(Error::duplicate_field("kind"))?,
+                (Field::Text, WithText(_)) => Err(Error::duplicate_field("text"))?,
+                (Field::Text, Finish(_)) => Err(Error::duplicate_field("text"))?,
             }
         }
 
-        const FIELDS: &[&str] = &["kind", "text"];
-        deserializer.deserialize_struct("Token", FIELDS, self)
+        match state {
+            Start | WithText(_) => Err(Error::missing_field("kind")),
+            WithKind(_) => Err(Error::missing_field("text")),
+            Finish(token) => Ok(token),
+        }
     }
 }
 
@@ -249,6 +246,31 @@ impl<'de> DeserializeSeed<'de> for NodeSeed<'_> {
     where
         D: Deserializer<'de>,
     {
+        const FIELDS: &[&str] = &["kind", "children"];
+        deserializer.deserialize_struct("Node", FIELDS, self)
+    }
+}
+impl<'de> Visitor<'de> for NodeSeed<'_> {
+    type Value = Arc<Node>;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "a sorbus green node")
+    }
+
+    fn visit_seq<Seq>(self, mut seq: Seq) -> Result<Self::Value, Seq::Error>
+    where
+        Seq: SeqAccess<'de>,
+    {
+        let kind = seq.next_element()?.ok_or_else(|| Error::invalid_length(0, &self))?;
+        let node = seq
+            .next_element_seed(NodeSeedKind(self.0, kind))?
+            .ok_or_else(|| Error::invalid_length(1, &self))?;
+        Ok(node)
+    }
+
+    fn visit_map<Map>(self, mut map: Map) -> Result<Self::Value, Map::Error>
+    where
+        Map: MapAccess<'de>,
+    {
         #[derive(Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
@@ -256,69 +278,43 @@ impl<'de> DeserializeSeed<'de> for NodeSeed<'_> {
             Children,
         }
 
-        impl<'de> Visitor<'de> for NodeSeed<'_> {
-            type Value = Arc<Node>;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "a sorbus green node")
-            }
+        use VisitState::*;
+        enum VisitState {
+            Start,
+            WithKind(Kind),
+            WithChildren(ArcBox<Node>),
+            Finish(Arc<Node>),
+        }
 
-            fn visit_seq<Seq>(self, mut seq: Seq) -> Result<Self::Value, Seq::Error>
-            where
-                Seq: SeqAccess<'de>,
-            {
-                let kind = seq.next_element()?.ok_or_else(|| Error::invalid_length(0, &self))?;
-                let node = seq
-                    .next_element_seed(NodeSeedKind(self.0, kind))?
-                    .ok_or_else(|| Error::invalid_length(1, &self))?;
-                Ok(node)
-            }
-
-            fn visit_map<Map>(self, mut map: Map) -> Result<Self::Value, Map::Error>
-            where
-                Map: MapAccess<'de>,
-            {
-                use VisitState::*;
-                enum VisitState {
-                    Start,
-                    WithKind(Kind),
-                    WithChildren(ArcBox<Node>),
-                    Finish(Arc<Node>),
+        let mut state = Start;
+        while let Some(key) = map.next_key()? {
+            state = match (key, state) {
+                (Field::Kind, Start) => WithKind(map.next_value()?),
+                (Field::Children, Start) => {
+                    WithChildren(map.next_value_seed(NodeChildrenSeed(self.0))?)
                 }
 
-                let mut state = Start;
-                while let Some(key) = map.next_key()? {
-                    state = match (key, state) {
-                        (Field::Kind, Start) => WithKind(map.next_value()?),
-                        (Field::Children, Start) => {
-                            WithChildren(map.next_value_seed(NodeChildrenSeed(self.0))?)
-                        }
-
-                        (Field::Kind, WithChildren(mut node)) => {
-                            node.set_kind(map.next_value()?);
-                            Finish(self.0.cache_node(node.into()))
-                        }
-                        (Field::Children, WithKind(kind)) => {
-                            Finish(map.next_value_seed(NodeSeedKind(self.0, kind))?)
-                        }
-
-                        (Field::Kind, WithKind(_)) => Err(Error::duplicate_field("kind"))?,
-                        (Field::Kind, Finish(_)) => Err(Error::duplicate_field("kind"))?,
-                        (Field::Children, WithChildren(_)) | (Field::Children, Finish(_)) => {
-                            Err(Error::duplicate_field("children"))?
-                        }
-                    }
+                (Field::Kind, WithChildren(mut node)) => {
+                    node.set_kind(map.next_value()?);
+                    Finish(self.0.cache_node(node.into()))
+                }
+                (Field::Children, WithKind(kind)) => {
+                    Finish(map.next_value_seed(NodeSeedKind(self.0, kind))?)
                 }
 
-                match state {
-                    Start | WithChildren(_) => Err(Error::missing_field("kind")),
-                    WithKind(_) => Err(Error::missing_field("children")),
-                    Finish(node) => Ok(node),
+                (Field::Kind, WithKind(_)) => Err(Error::duplicate_field("kind"))?,
+                (Field::Kind, Finish(_)) => Err(Error::duplicate_field("kind"))?,
+                (Field::Children, WithChildren(_)) | (Field::Children, Finish(_)) => {
+                    Err(Error::duplicate_field("children"))?
                 }
             }
         }
 
-        const FIELDS: &[&str] = &["kind", "children"];
-        deserializer.deserialize_struct("Node", FIELDS, self)
+        match state {
+            Start | WithChildren(_) => Err(Error::missing_field("kind")),
+            WithKind(_) => Err(Error::missing_field("children")),
+            Finish(node) => Ok(node),
+        }
     }
 }
 
@@ -401,6 +397,20 @@ impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
     where
         D: Deserializer<'de>,
     {
+        const VARIANTS: &[&str] = &["Node", "Token"];
+        deserializer.deserialize_enum("NodeOrToken", VARIANTS, self)
+    }
+}
+impl<'de> Visitor<'de> for ElementSeed<'_> {
+    type Value = NodeOrToken<Arc<Node>, Arc<Token>>;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "a sorbus green node or token")
+    }
+
+    fn visit_enum<Data>(self, data: Data) -> Result<Self::Value, Data::Error>
+    where
+        Data: EnumAccess<'de>,
+    {
         #[derive(Deserialize)]
         #[serde(variant_identifier)]
         enum Variant {
@@ -408,29 +418,13 @@ impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
             Token,
         }
 
-        struct ElementVisitor<'a>(&'a mut Builder);
-        impl<'de> Visitor<'de> for ElementVisitor<'_> {
-            type Value = NodeOrToken<Arc<Node>, Arc<Token>>;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "a sorbus green node or token")
-            }
-
-            fn visit_enum<Data>(self, data: Data) -> Result<Self::Value, Data::Error>
-            where
-                Data: EnumAccess<'de>,
-            {
-                match data.variant()? {
-                    (Variant::Node, variant) => Ok(NodeOrToken::Node(
-                        variant.struct_variant(&["kind", "children"], NodeSeed(self.0))?,
-                    )),
-                    (Variant::Token, variant) => Ok(NodeOrToken::Token(
-                        variant.struct_variant(&["kind", "text"], TokenSeed(self.0))?,
-                    )),
-                }
-            }
+        match data.variant()? {
+            (Variant::Node, variant) => Ok(NodeOrToken::Node(
+                variant.struct_variant(&["kind", "children"], NodeSeed(self.0))?,
+            )),
+            (Variant::Token, variant) => Ok(NodeOrToken::Token(
+                variant.struct_variant(&["kind", "text"], TokenSeed(self.0))?,
+            )),
         }
-
-        const VARIANTS: &[&str] = &["Node", "Token"];
-        deserializer.deserialize_enum("NodeOrToken", VARIANTS, ElementVisitor(self.0))
     }
 }
