@@ -109,6 +109,30 @@ const TREE_SER: &[T] = &[
 ];
 
 #[rustfmt::skip]
+const TREE_SEQ: &[T] = &[
+    T::Seq { len: Some(2) },
+        T::NewtypeStruct { name: "Kind" },
+            T::U16(2),
+        T::Seq { len: Some(2) },
+            T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                T::Str("kind"),
+                    T::NewtypeStruct { name: "Kind" },
+                        T::U16(0),
+                T::Str("text"),
+                    T::Str("0"),
+            T::StructVariantEnd,
+            T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                T::Str("kind"),
+                    T::NewtypeStruct { name: "Kind" },
+                        T::U16(1),
+                T::Str("text"),
+                    T::Str("1"),
+            T::StructVariantEnd,
+        T::SeqEnd,
+    T::SeqEnd,
+];
+
+#[rustfmt::skip]
 const YODA_SER: &[T] = &[
     T::Struct { name: "Node", len: 2 },
         T::Str("children"),
@@ -137,6 +161,7 @@ const YODA_SER: &[T] = &[
 #[test]
 fn tree_de_serialization() {
     assert_tokens(&make_tree(), TREE_SER);
+    assert_de_tokens(&make_tree(), TREE_SEQ);
     assert_de_tokens(&make_tree(), YODA_SER);
 }
 
@@ -155,9 +180,19 @@ const TOKEN_SER: &[T] = &[
     T::StructEnd,
 ];
 
+#[rustfmt::skip]
+const TOKEN_SEQ: &[T] = &[
+    T::Seq { len: Some(2) },
+        T::NewtypeStruct { name: "Kind" },
+            T::U16(!0),
+        T::Str("no-this-is-patrick"),
+    T::SeqEnd,
+];
+
 #[test]
 fn token_de_serialization() {
     assert_tokens(&make_token(), TOKEN_SER);
+    assert_de_tokens(&make_token(), TOKEN_SEQ);
 }
 
 #[test]
