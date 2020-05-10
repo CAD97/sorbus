@@ -14,12 +14,6 @@ use {
 #[derive(Debug, Clone)]
 struct ThinEqNode(Arc<Node>);
 
-impl From<Arc<Node>> for ThinEqNode {
-    fn from(this: Arc<Node>) -> Self {
-        ThinEqNode(this)
-    }
-}
-
 impl Eq for ThinEqNode {}
 impl PartialEq for ThinEqNode {
     fn eq(&self, other: &Self) -> bool {
@@ -176,6 +170,7 @@ impl TreeBuilder {
             panic!("called `TreeBuilder::finish_node` without paired `start_node`")
         });
         let children = self.children.drain(first_child..);
+        // NB: inline Self::node here because of borrow on `self.children`
         let node = self.cache.node(kind, children);
         self.add(node)
     }
