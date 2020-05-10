@@ -13,6 +13,11 @@ struct Node {
     raw: Arc<green::Node>,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct Token {
+    raw: Arc<green::Token>,
+}
+
 impl Serialize for Node {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -28,6 +33,24 @@ impl<'de> Deserialize<'de> for Node {
         D: Deserializer<'de>,
     {
         Ok(Node { raw: green::Builder::new().deserialize_node().deserialize(deserializer)? })
+    }
+}
+
+impl Serialize for Token {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.raw.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Token {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Token { raw: green::Builder::new().deserialize_token().deserialize(deserializer)? })
     }
 }
 
@@ -60,7 +83,7 @@ fn make_tree() -> Node {
 }
 
 #[rustfmt::skip]
-static TREE_SER: &[T] = &[
+const TREE_SER: &[T] = &[
     T::Struct { name: "Node", len: 2 },
         T::Str("kind"),
             T::NewtypeStruct { name: "Kind" },
@@ -86,7 +109,7 @@ static TREE_SER: &[T] = &[
 ];
 
 #[rustfmt::skip]
-static YODA_SER: &[T] = &[
+const YODA_SER: &[T] = &[
     T::Struct { name: "Node", len: 2 },
         T::Str("children"),
             T::Seq { len: Some(2) },
@@ -115,6 +138,26 @@ static YODA_SER: &[T] = &[
 fn tree_de_serialization() {
     assert_tokens(&make_tree(), TREE_SER);
     assert_de_tokens(&make_tree(), YODA_SER);
+}
+
+fn make_token() -> Token {
+    Token { raw: green::Builder::new().token(Kind(!0), "no-this-is-patrick") }
+}
+
+#[rustfmt::skip]
+const TOKEN_SER: &[T] = &[
+    T::Struct { name: "Token", len: 2 },
+        T::Str("kind"),
+            T::NewtypeStruct { name: "Kind" },
+                T::U16(!0),
+        T::Str("text"),
+            T::Str("no-this-is-patrick"),
+    T::StructEnd,
+];
+
+#[test]
+fn token_de_serialization() {
+    assert_tokens(&make_token(), TOKEN_SER);
 }
 
 #[test]
@@ -163,7 +206,7 @@ fn deduplication_of_nodes_happens() {
     let mut children = node.raw.children();
     assert!(ptr::eq(
         &*children.next().unwrap().unwrap_node(),
-        &*children.next().unwrap().unwrap_node()
+        &*children.next().unwrap().unwrap_node(),
     ));
 
     // with SeqAccess::size_hint
@@ -171,6 +214,6 @@ fn deduplication_of_nodes_happens() {
     let mut children = node.raw.children();
     assert!(ptr::eq(
         &*children.next().unwrap().unwrap_node(),
-        &*children.next().unwrap().unwrap_node()
+        &*children.next().unwrap().unwrap_node(),
     ));
 }
