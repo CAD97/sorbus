@@ -1,0 +1,35 @@
+name: CI
+on:
+  push:
+    branches:
+      - master
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  coverage:
+    name: Coverage (tarpaulin) (master)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Toolchain
+        id: toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Cache
+        uses: actions/cache@v1
+        with:
+          path: target
+          key: rustc-${{ steps.toolchain.outputs.rustc_hash }}-tarpaulin-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Tarpaulin
+        uses: actions-rs/tarpaulin@v0.1
+        with:
+          version: '0.12.3' # update ci.yaml as well
+          args: --all-features
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v1
