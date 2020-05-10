@@ -263,3 +263,34 @@ fn deduplication_of_nodes_happens() {
     let reserialized = serde_json::to_string_pretty(&node).unwrap();
     assert_eq!(tree_json, reserialized);
 }
+
+#[test]
+fn deduplication_of_tokens_happens() {
+    let tree_json = r#"{
+  "kind": 2,
+  "children": [
+    {
+      "Token": {
+        "kind": 0,
+        "text": " "
+      }
+    },
+    {
+      "Token": {
+        "kind": 0,
+        "text": " "
+      }
+    }
+  ]
+}"#;
+
+    let node: Node = serde_json::from_str(tree_json).unwrap();
+    let mut children = node.raw.children();
+    assert!(ptr::eq(
+        &*children.next().unwrap().unwrap_token(),
+        &*children.next().unwrap().unwrap_token(),
+    ));
+
+    let reserialized = serde_json::to_string_pretty(&node).unwrap();
+    assert_eq!(tree_json, reserialized);
+}
