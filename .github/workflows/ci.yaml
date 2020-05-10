@@ -108,12 +108,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: miri
-          args: test --all-features --target x86_64-unknown-linux-gnu
+          args: test --all-features --all-targets --target x86_64-unknown-linux-gnu
       - name: Test 32 bit target
         uses: actions-rs/cargo@v1
         with:
           command: miri
-          args: test --all-features --target i686-unknown-linux-gnu
+          args: test --all-features --all-targets --target i686-unknown-linux-gnu
 
   coverage:
     name: Coverage (tarpaulin)
@@ -138,6 +138,6 @@ jobs:
         uses: actions-rs/tarpaulin@v0.1
         with:
           version: '0.12.3' # update ci-master.yaml as well
-          args: --all-features --ignore-tests --run-types Tests Examples # Doctests tarpaulin#402
+          args: --all-features --ignore-tests --run-types Tests # Doctests tarpaulin#402
       - name: Upload coverage report
         uses: codecov/codecov-action@v1
