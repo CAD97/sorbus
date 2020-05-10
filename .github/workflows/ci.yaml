@@ -4,7 +4,6 @@ on:
     branches:
       - staging
       - trying
-      - master
   pull_request:
 
 env:
@@ -138,7 +137,7 @@ jobs:
       - name: Run Tarpaulin
         uses: actions-rs/tarpaulin@v0.1
         with:
-          version: '0.12.3'
+          version: '0.12.3' # update ci-master.yaml as well
           args: --all-features
       - name: Upload coverage report
         uses: codecov/codecov-action@v1
