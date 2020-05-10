@@ -212,29 +212,37 @@ fn assert_serialization_formats() {
 
 #[test]
 fn deduplication_of_nodes_happens() {
-    let tree_json = r##"{
-        "kind": 2,
+    let tree_json = r#"{
+  "kind": 2,
+  "children": [
+    {
+      "Node": {
+        "kind": 1,
         "children": [
-            {"Node":{
-                "kind": 1,
-                "children": [
-                    {"Token":{
-                        "kind": 0,
-                        "text": " "
-                    }}
-                ]
-            }},
-            {"Node":{
-                "kind": 1,
-                "children": [
-                    {"Token":{
-                        "kind": 0,
-                        "text": " "
-                    }}
-                ]
-            }}
+          {
+            "Token": {
+              "kind": 0,
+              "text": " "
+            }
+          }
         ]
-    }"##;
+      }
+    },
+    {
+      "Node": {
+        "kind": 1,
+        "children": [
+          {
+            "Token": {
+              "kind": 0,
+              "text": " "
+            }
+          }
+        ]
+      }
+    }
+  ]
+}"#;
 
     // without SeqAccess::size_hint
     let node: Node = serde_json::from_str(tree_json).unwrap();
@@ -251,4 +259,7 @@ fn deduplication_of_nodes_happens() {
         &*children.next().unwrap().unwrap_node(),
         &*children.next().unwrap().unwrap_node(),
     ));
+
+    let reserialized = serde_json::to_string_pretty(&node).unwrap();
+    assert_eq!(tree_json, reserialized);
 }
