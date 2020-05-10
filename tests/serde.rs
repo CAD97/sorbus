@@ -1,7 +1,7 @@
 use {
     insta::{assert_json_snapshot, assert_ron_snapshot, assert_yaml_snapshot, with_settings},
     serde::{de::DeserializeSeed, Deserialize, Deserializer, Serialize, Serializer},
-    serde_test::{assert_tokens, Token as T},
+    serde_test::{assert_de_tokens, assert_tokens, Token as T},
     sorbus::*,
     std::{ptr, sync::Arc},
 };
@@ -59,36 +59,62 @@ fn make_tree() -> Node {
     make_tree_with(&mut green::TreeBuilder::new())
 }
 
+#[rustfmt::skip]
+static TREE_SER: &[T] = &[
+    T::Struct { name: "Node", len: 2 },
+        T::Str("kind"),
+            T::NewtypeStruct { name: "Kind" },
+                T::U16(2),
+        T::Str("children"),
+            T::Seq { len: Some(2) },
+                T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                    T::Str("kind"),
+                        T::NewtypeStruct { name: "Kind" },
+                            T::U16(0),
+                    T::Str("text"),
+                        T::Str("0"),
+                T::StructVariantEnd,
+                T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                    T::Str("kind"),
+                        T::NewtypeStruct { name: "Kind" },
+                            T::U16(1),
+                    T::Str("text"),
+                        T::Str("1"),
+                T::StructVariantEnd,
+            T::SeqEnd,
+    T::StructEnd,
+];
+
+#[rustfmt::skip]
+static YODA_SER: &[T] = &[
+    T::Struct { name: "Node", len: 2 },
+        T::Str("children"),
+            T::Seq { len: Some(2) },
+                T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                    T::Str("text"),
+                        T::Str("0"),
+                    T::Str("kind"),
+                        T::NewtypeStruct { name: "Kind" },
+                            T::U16(0),
+                T::StructVariantEnd,
+                T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                    T::Str("text"),
+                        T::Str("1"),
+                    T::Str("kind"),
+                        T::NewtypeStruct { name: "Kind" },
+                            T::U16(1),
+                T::StructVariantEnd,
+            T::SeqEnd,
+        T::Str("kind"),
+            T::NewtypeStruct { name: "Kind" },
+                T::U16(2),
+    T::StructEnd,
+];
+
 #[test]
 fn tree_de_serialization() {
-    #[rustfmt::skip]
-    assert_tokens(
-        &make_tree(),
-        &[
-            T::Struct { name: "Node", len: 2 },
-                T::Str("kind"),
-                    T::NewtypeStruct { name: "Kind" },
-                        T::U16(2),
-                T::Str("children"),
-                    T::Seq { len: Some(2) },
-                        T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
-                            T::Str("kind"),
-                                T::NewtypeStruct { name: "Kind" },
-                                    T::U16(0),
-                            T::Str("text"),
-                                T::Str("0"),
-                        T::StructVariantEnd,
-                        T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
-                            T::Str("kind"),
-                                T::NewtypeStruct { name: "Kind" },
-                                    T::U16(1),
-                            T::Str("text"),
-                                T::Str("1"),
-                        T::StructVariantEnd,
-                    T::SeqEnd,
-            T::StructEnd,
-        ]
-    );
+    assert_tokens(&make_tree(), TREE_SER);
+    assert_de_tokens(&make_tree(), YODA_SER);
 }
 
 #[test]
