@@ -36,6 +36,19 @@ use {
 
 // SAFETY: align of Node and Token are >= 2
 const ARC_UNION_PROOF: Builder2<Arc<Node>, Arc<Token>> = unsafe { Builder2::new_unchecked() };
+pub(super) type PackedNodeOrToken = Union2<Arc<Node>, Arc<Token>>;
+pub(super) fn pack_node_or_token(el: NodeOrToken<Arc<Node>, Arc<Token>>) -> PackedNodeOrToken {
+    match el {
+        NodeOrToken::Node(node) => ARC_UNION_PROOF.a(node),
+        NodeOrToken::Token(token) => ARC_UNION_PROOF.b(token),
+    }
+}
+pub(super) fn unpack_node_or_token(el: PackedNodeOrToken) -> NodeOrToken<Arc<Node>, Arc<Token>> {
+    match el.unpack() {
+        Enum2::A(node) => NodeOrToken::Node(node),
+        Enum2::B(token) => NodeOrToken::Token(token),
+    }
+}
 
 /// # Safety
 ///
@@ -53,21 +66,21 @@ pub(super) union Element {
     half_aligned: HalfAlignedElementRepr,
 }
 
-// SAFETY: Element is logically a (TextSize, Union2<Arc<Node>, Arc<Token>>)
+// SAFETY: Element is logically a (TextSize, PackedNodeOrToken)
 // ptr-union is a private dependency, so we assert Union2 send/sync separately
 unsafe impl Send for Element {}
 unsafe impl Sync for Element {}
 
 const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<(TextSize, Union2<Arc<Node>, Arc<Token>>)>();
+    assert_send_sync::<(TextSize, PackedNodeOrToken)>();
 };
 
 /// # Safety
 ///
 /// - Must be aligned to 8 bytes (usize, u64)
 /// - This is only Copy because of requirements for `union`;
-///   logically this is a `(TextSize, Union2<Arc<Node>, Arc<Token>>)`,
+///   logically this is a `(TextSize, PackedNodeOrToken)`,
 ///   and must be treated as such.
 #[derive(Copy, Clone)] // required for union
 #[repr(C, packed)]
@@ -89,7 +102,7 @@ pub(super) struct FullAlignedElement {
 /// - Must be aligned to 8 bytes + 4 (usize, u64 + 1/2).
 ///   (That is, aligned to 4 but not 8.)
 /// - This is only Copy because of requirements for `union`;
-///   logically this is a `(TextSize, Union2<Arc<Node>, Arc<Token>>)`,
+///   logically this is a `(TextSize, PackedNodeOrToken)`,
 ///   and must be treated as such.
 #[derive(Copy, Clone)] // required for union
 #[repr(C, packed)]
@@ -226,7 +239,7 @@ macro_rules! impl_element {
             }
 
             #[allow(clippy::deref_addrof)] // tell rustc that it's aligned
-            pub(super) unsafe fn take(&mut self) -> Union2<Arc<Node>, Arc<Token>> {
+            pub(super) unsafe fn take(&mut self) -> PackedNodeOrToken {
                 ErasablePtr::unerase(*&self.repr.ptr)
             }
         }
@@ -275,17 +288,11 @@ impl_element!(FullAlignedElement);
 impl_element!(HalfAlignedElement);
 
 impl FullAlignedElement {
-    pub(super) unsafe fn write(
-        ptr: *mut Element,
-        element: NodeOrToken<Arc<Node>, Arc<Token>>,
-        offset: TextSize,
-    ) {
+    pub(super) unsafe fn write(ptr: *mut Element, element: PackedNodeOrToken, offset: TextSize) {
         debug_assert!(
             ptr as usize % 8 == 0,
             "attempted to write full-aligned element to half-aligned place; this is UB!",
         );
-        let element =
-            element.map(|node| ARC_UNION_PROOF.a(node), |token| ARC_UNION_PROOF.b(token)).flatten();
         let element = ErasablePtr::erase(element);
         let ptr = ptr.cast();
         ptr::write(ptr, element);
@@ -296,17 +303,11 @@ impl FullAlignedElement {
 
 #[cfg(target_pointer_width = "64")]
 impl HalfAlignedElement {
-    pub(super) unsafe fn write(
-        ptr: *mut Element,
-        element: NodeOrToken<Arc<Node>, Arc<Token>>,
-        offset: TextSize,
-    ) {
+    pub(super) unsafe fn write(ptr: *mut Element, element: PackedNodeOrToken, offset: TextSize) {
         debug_assert!(
             ptr as usize % 8 == 4,
             "attempted to write half-aligned element to full-aligned place; this is UB!",
         );
-        let element =
-            element.map(|node| ARC_UNION_PROOF.a(node), |token| ARC_UNION_PROOF.b(token)).flatten();
         let element = ErasablePtr::erase(element);
         let ptr = ptr.cast();
         ptr::write(ptr, offset);

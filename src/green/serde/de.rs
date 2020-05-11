@@ -4,7 +4,7 @@ extern crate serde; // this line required to workaround rust-lang/rust#55779
 
 use {
     crate::{
-        green::{Builder, Node, Token},
+        green::{pack_node_or_token, Builder, Node, PackedNodeOrToken, Token},
         Kind, NodeOrToken,
     },
     rc_box::ArcBox,
@@ -293,7 +293,7 @@ impl<'de> Visitor<'de> for NodeChildrenSeed<'_> {
             while let Some(element) = seq.next_element_seed(ElementSeed(self.0))? {
                 children.push(element);
             }
-            Ok(Node::new(Kind(0), children))
+            Ok(Node::new(Kind(0), children.into_iter()))
         }
     }
 }
@@ -304,7 +304,7 @@ struct SeqAccessExactSizeIterator<'a, 'de, Seq: SeqAccess<'de>>(
     PhantomData<&'de ()>,
 );
 impl<'de, Seq: SeqAccess<'de>> Iterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
-    type Item = Result<NodeOrToken<Arc<Node>, Arc<Token>>, Seq::Error>;
+    type Item = Result<PackedNodeOrToken, Seq::Error>;
     fn next(&mut self) -> Option<Self::Item> {
         self.1.next_element_seed(ElementSeed(self.0)).transpose()
     }
@@ -322,7 +322,7 @@ impl<'de, Seq: SeqAccess<'de>> ExactSizeIterator for SeqAccessExactSizeIterator<
 
 struct ElementSeed<'a>(&'a mut Builder);
 impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
-    type Value = NodeOrToken<Arc<Node>, Arc<Token>>;
+    type Value = PackedNodeOrToken;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -333,7 +333,7 @@ impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
     }
 }
 impl<'de> Visitor<'de> for ElementSeed<'_> {
-    type Value = NodeOrToken<Arc<Node>, Arc<Token>>;
+    type Value = PackedNodeOrToken;
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "a sorbus green node or token")
     }
@@ -349,13 +349,13 @@ impl<'de> Visitor<'de> for ElementSeed<'_> {
             Token,
         }
 
-        match data.variant()? {
-            (Variant::Node, variant) => Ok(NodeOrToken::Node(
-                variant.struct_variant(&["kind", "children"], NodeSeed(self.0))?,
-            )),
-            (Variant::Token, variant) => Ok(NodeOrToken::Token(
-                variant.struct_variant(&["kind", "text"], TokenSeed(self.0))?,
-            )),
-        }
+        Ok(pack_node_or_token(match data.variant()? {
+            (Variant::Node, variant) => {
+                NodeOrToken::Node(variant.struct_variant(&["kind", "children"], NodeSeed(self.0))?)
+            }
+            (Variant::Token, variant) => {
+                NodeOrToken::Token(variant.struct_variant(&["kind", "text"], TokenSeed(self.0))?)
+            }
+        }))
     }
 }

@@ -16,4 +16,7 @@ pub use self::{
     node::Node,
     token::Token,
 };
-pub(self) use element::{Element, FullAlignedElement, HalfAlignedElement};
+pub(self) use element::{
+    pack_node_or_token, unpack_node_or_token, Element, FullAlignedElement, HalfAlignedElement,
+    PackedNodeOrToken,
+};
