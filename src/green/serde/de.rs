@@ -285,28 +285,6 @@ impl<'de> Visitor<'de> for NodeChildrenSeed<'_> {
         Seq: SeqAccess<'de>,
     {
         if seq.size_hint().is_some() {
-            struct SeqAccessExactSizeIterator<'a, 'de, Seq: SeqAccess<'de>>(
-                &'a mut Builder,
-                Seq,
-                PhantomData<&'de ()>,
-            );
-            impl<'de, Seq: SeqAccess<'de>> Iterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
-                type Item = Result<NodeOrToken<Arc<Node>, Arc<Token>>, Seq::Error>;
-                fn next(&mut self) -> Option<Self::Item> {
-                    self.1.next_element_seed(ElementSeed(self.0)).transpose()
-                }
-
-                fn size_hint(&self) -> (usize, Option<usize>) {
-                    let len = self.len();
-                    (len, Some(len))
-                }
-            }
-            impl<'de, Seq: SeqAccess<'de>> ExactSizeIterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
-                fn len(&self) -> usize {
-                    self.1.size_hint().unwrap()
-                }
-            }
-
             let node =
                 Node::try_new(Kind(0), SeqAccessExactSizeIterator(self.0, seq, PhantomData))?;
             Ok(node)
@@ -317,6 +295,28 @@ impl<'de> Visitor<'de> for NodeChildrenSeed<'_> {
             }
             Ok(Node::new(Kind(0), children))
         }
+    }
+}
+
+struct SeqAccessExactSizeIterator<'a, 'de, Seq: SeqAccess<'de>>(
+    &'a mut Builder,
+    Seq,
+    PhantomData<&'de ()>,
+);
+impl<'de, Seq: SeqAccess<'de>> Iterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
+    type Item = Result<NodeOrToken<Arc<Node>, Arc<Token>>, Seq::Error>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.1.next_element_seed(ElementSeed(self.0)).transpose()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+impl<'de, Seq: SeqAccess<'de>> ExactSizeIterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
+    fn len(&self) -> usize {
+        self.1.size_hint().unwrap()
     }
 }
 
