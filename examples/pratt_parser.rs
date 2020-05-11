@@ -53,10 +53,25 @@ impl<'src> Lexer<'src> {
     }
 
     fn next(&mut self) -> Option<Token<'src>> {
-        self.tokens.pop_front()
+        loop {
+            let token = self.tokens.pop_front()?;
+            if let Token { kind: WS, src } = token {
+                self.builder.token(WS, src);
+            } else {
+                return Some(token);
+            }
+        }
     }
-    fn peek(&self) -> Option<Token<'src>> {
-        self.tokens.front().copied()
+
+    fn peek(&mut self) -> Option<Token<'src>> {
+        self.tokens.iter().copied().find(|token| token.kind != WS)
+    }
+
+    fn eager_eat_ws(&mut self) {
+        while let Some(Token { kind: WS, src }) = self.tokens.front() {
+            self.builder.token(WS, src);
+            self.tokens.pop_front();
+        }
     }
 }
 
@@ -93,25 +108,14 @@ fn expr(input: &str) -> Arc<green::Node> {
     eprintln!();
     let mut lexer = Lexer::new(dbg!(input));
     expr_bp(&mut lexer, 0);
+    eprintln!();
     lexer.builder.finish()
-}
-
-fn eat_ws(lexer: &mut Lexer) {
-    // only emit a single normalized whitespace for simplicity of testing
-    if let Some(Token { kind: WS, .. }) = lexer.peek() {
-        lexer.next();
-        lexer.builder.token(WS, " ");
-    }
-    while let Some(Token { kind: WS, .. }) = lexer.peek() {
-        lexer.next();
-    }
 }
 
 fn expr_bp(lexer: &mut Lexer, min_bp: u8) {
     let checkpoint = lexer.builder.checkpoint();
     lexer.builder.start_node(EXPR);
 
-    eat_ws(lexer);
     // prefix operators
     match lexer.next() {
         Some(Token { kind: ATOM, src }) => {
@@ -133,7 +137,6 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) {
     };
 
     loop {
-        eat_ws(lexer);
         let op = match lexer.peek() {
             None => break,
             Some(Token { kind: OP, src }) => src,
@@ -145,8 +148,7 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) {
             if l_bp < min_bp {
                 break;
             }
-            lexer.builder.finish_node();
-            lexer.builder.start_node_at(checkpoint, EXPR);
+            lexer.builder.start_node_at(checkpoint, EXPR).finish_node();
             lexer.next();
             lexer.builder.token(OP, op);
 
@@ -161,17 +163,16 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) {
             if l_bp < min_bp {
                 break;
             }
-            lexer.builder.finish_node();
-            lexer.builder.start_node_at(checkpoint, EXPR);
+            lexer.builder.start_node_at(checkpoint, EXPR).finish_node();
             lexer.next();
             lexer.builder.token(OP, op);
-            eat_ws(lexer);
+            lexer.eager_eat_ws();
 
             if op == "?" {
                 expr_bp(lexer, 0);
                 assert_eq!(lexer.next(), Some(Token { kind: OP, src: ":" }));
                 lexer.builder.token(OP, ":");
-                eat_ws(lexer);
+                lexer.eager_eat_ws();
             }
             expr_bp(lexer, r_bp);
 
@@ -219,16 +220,16 @@ fn tests() {
     assert_eq!(dump(&s), "⟪1 + ⟪2 * 3⟫⟫");
 
     let s = expr("a + b * c * d + e");
-    assert_eq!(dump(&s), "⟪⟪a + ⟪⟪b * c ⟫* d ⟫⟫+ e⟫");
+    assert_eq!(dump(&s), "⟪⟪a + ⟪⟪b * c⟫ * d⟫⟫ + e⟫");
 
     let s = expr("f . g . h");
     assert_eq!(dump(&s), "⟪f . ⟪g . h⟫⟫");
 
     let s = expr("1 + 2 + f . g . h * 3 * 4");
-    assert_eq!(dump(&s), "⟪⟪1 + 2 ⟫+ ⟪⟪⟪f . ⟪g . h ⟫⟫* 3 ⟫* 4⟫⟫");
+    assert_eq!(dump(&s), "⟪⟪1 + 2⟫ + ⟪⟪⟪f . ⟪g . h⟫⟫ * 3⟫ * 4⟫⟫");
 
     let s = expr("--1 * 2");
-    assert_eq!(dump(&s), "⟪⟪-⟪-1 ⟫⟫* 2⟫");
+    assert_eq!(dump(&s), "⟪⟪-⟪-1⟫⟫ * 2⟫");
 
     let s = expr("--f . g");
     assert_eq!(dump(&s), "⟪-⟪-⟪f . g⟫⟫⟫");
@@ -237,7 +238,7 @@ fn tests() {
     assert_eq!(dump(&s), "⟪-⟪9!⟫⟫");
 
     let s = expr("f . g !");
-    assert_eq!(dump(&s), "⟪⟪f . g ⟫!⟫");
+    assert_eq!(dump(&s), "⟪⟪f . g⟫ !⟫");
 
     let s = expr("(((0)))");
     assert_eq!(dump(&s), "⟪(⟪(⟪(0)⟫)⟫)⟫");
@@ -249,7 +250,7 @@ fn tests() {
     assert_eq!(dump(&s), "⟪a ? b : ⟪c ? d : e⟫⟫");
 
     let s = expr("a = 0 ? b : c = d");
-    assert_eq!(dump(&s), "⟪a = ⟪⟪0 ? b : c ⟫= d⟫⟫")
+    assert_eq!(dump(&s), "⟪a = ⟪⟪0 ? b : c⟫ = d⟫⟫")
 }
 
 fn main() -> std::io::Result<()> {
