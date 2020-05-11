@@ -59,13 +59,12 @@ impl Drop for Node {
         /// The node will still be properly dropped, just by calling its destructor
         /// rather than taking its children into the iterative drop list.
         fn maybe_drop_into(mut this: Arc<Node>, stack: &mut Vec<Arc<Node>>) {
-            if Arc::get_mut(&mut this).is_some() {
+            if let Some(node) = Arc::get_mut(&mut this) {
                 unsafe {
-                    // Skip running the node's destructor,
-                    let mut this: Arc<ManuallyDrop<Node>> =
-                        Arc::from_raw(Arc::into_raw(this) as *const _);
-                    // But queue all of the children to be destructed.
-                    drop_into(Arc::get_mut/*_unchecked*/(&mut this).unwrap(), stack)
+                    // Queue all of the children to be destructed, and
+                    drop_into(node, stack);
+                    // Skip running the node's destructor.
+                    Arc::<ManuallyDrop<Node>>::from_raw(Arc::into_raw(this) as *const _);
                 }
             } else {
                 // NB: May actually be the last Arc, if above `Arc::get_mut` races with another thread.
