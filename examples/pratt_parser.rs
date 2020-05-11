@@ -254,7 +254,6 @@ fn tests() {
 
 fn main() -> std::io::Result<()> {
     use std::io::BufRead;
-    #[cfg(not(miri))]
     for line in std::io::stdin().lock().lines() {
         let line = line?;
         let s = expr(&line);
