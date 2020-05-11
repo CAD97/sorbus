@@ -108,12 +108,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: miri
-          args: test --all-features --all-targets --target x86_64-unknown-linux-gnu
+          args: test --all-features --target x86_64-unknown-linux-gnu
       - name: Test 32 bit target
         uses: actions-rs/cargo@v1
         with:
           command: miri
-          args: test --all-features --all-targets --target i686-unknown-linux-gnu
+          args: test --all-features --target i686-unknown-linux-gnu
 
   coverage:
     name: Coverage (tarpaulin)
