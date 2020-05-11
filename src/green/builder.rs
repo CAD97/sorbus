@@ -260,6 +260,34 @@ impl TreeBuilder {
         self
     }
 
+    /// Finish the current branch up to a given checkpoint,
+    /// and restore its parent as current.
+    ///
+    /// Any nodes after the used checkpoint will be shifted from the
+    /// current branch to its parent, after the newly finished node.
+    ///
+    /// Prefer using regular `finish_node` and delaying adding branches
+    /// when possible, as its operations on the underlying buffer are
+    /// marginally more efficient and involve less moving of elements.
+    pub fn finish_node_at(&mut self, Checkpoint(checkpoint): Checkpoint) -> &mut Self {
+        assert!(
+            checkpoint <= self.children.len(),
+            "checkpoint no longer valid; was `finish_node` called early?",
+        );
+
+        let (kind, first_child) = self.stack.pop().unwrap_or_else(|| {
+            panic!("called `TreeBuilder::finish_node_at` without paired `start_node`")
+        });
+        assert!(
+            checkpoint >= first_child,
+            "checkpoint no longer valid; was an unmatched `start_node` called?",
+        );
+        let children = self.children.drain(first_child..checkpoint);
+        // NB: inline Self::node here because of borrow on `self.children`
+        let node = self.cache.node(kind, children);
+        self.add(node)
+    }
+
     /// Complete the current tree building.
     ///
     /// This `TreeBuilder` is reset and can be used to build a new tree.
