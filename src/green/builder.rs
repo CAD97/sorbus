@@ -14,12 +14,6 @@ use {
 #[derive(Debug, Clone)]
 struct ThinEqNode(Arc<Node>);
 
-impl From<Arc<Node>> for ThinEqNode {
-    fn from(this: Arc<Node>) -> Self {
-        ThinEqNode(this)
-    }
-}
-
 impl Eq for ThinEqNode {}
 impl PartialEq for ThinEqNode {
     fn eq(&self, other: &Self) -> bool {
@@ -176,6 +170,7 @@ impl TreeBuilder {
             panic!("called `TreeBuilder::finish_node` without paired `start_node`")
         });
         let children = self.children.drain(first_child..);
+        // NB: inline Self::node here because of borrow on `self.children`
         let node = self.cache.node(kind, children);
         self.add(node)
     }
@@ -183,11 +178,65 @@ impl TreeBuilder {
     /// Prepare for maybe wrapping the next node.
     ///
     /// To potentially wrap elements into a node, first create a checkpoint,
-    /// add all items that might be wrapped, then maybe call `start_node_at`.
+    /// add some items that might be wrapped, then maybe call `start_node_at`.
+    /// Don't forget to still call [`finish_node`] for the newly started node!
+    ///
+    ///   [`finish_node`]: TreeBuilder::finish_node
     ///
     /// # Examples
     ///
-    //  TODO: Example
+    /// Checkpoints can be used to implement [pratt parsing]:
+    ///
+    ///   [pratt parsing]: <https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html>
+    ///
+    /// ```rust
+    /// # use {sorbus::{green::*, Kind, Kind as Token}, std::iter::Peekable};
+    /// # const ATOM: Kind = Kind(0); const EXPR: Kind = Kind(4);
+    /// # const PLUS: Kind = Kind(1); const MUL: Kind = Kind(2);
+    /// # fn binding_power(kind: &Token) -> f32 { kind.0 as f32 }
+    /// # fn text_of(kind: Kind) -> &'static str { match kind {
+    /// #     ATOM => "atom", PLUS => "+", MUL => "*", _ => panic!(),
+    /// # } }
+    /// # fn kind_of(kind: Kind) -> Kind { kind }
+    /// fn parse_expr(b: &mut TreeBuilder, bind: f32, tts: &mut Peekable<impl Iterator<Item=Token>>) {
+    ///     let start = b.checkpoint();
+    ///     // just assume the tokens are correct for the example
+    ///     let first_token = tts.next().unwrap();
+    ///     b.token(kind_of(first_token), text_of(first_token));
+    ///     loop {
+    ///         let power = match tts.peek() {
+    ///             None => break,
+    ///             Some(op) => binding_power(op),
+    ///         };
+    ///         if power < bind { break; }
+    ///         let op_token = tts.next().unwrap();
+    ///         b.token(kind_of(op_token), text_of(op_token));
+    ///         parse_expr(&mut *b, power, &mut *tts);
+    ///         b.start_node_at(start, EXPR).finish_node();
+    ///     }
+    /// }
+    ///
+    /// let tokens = vec![ATOM, MUL, ATOM, PLUS, ATOM, MUL, ATOM]; // atom*atom+atom*atom
+    /// # let mut builder = TreeBuilder::new();
+    /// let expected_tree = builder
+    ///     .start_node(EXPR)
+    ///         .start_node(EXPR)
+    ///             .token(ATOM, "atom")
+    ///             .token(MUL, "*")
+    ///             .token(ATOM, "atom")
+    ///         .finish_node()
+    ///         .token(PLUS, "+")
+    ///         .start_node(EXPR)
+    ///             .token(ATOM, "atom")
+    ///             .token(MUL, "*")
+    ///             .token(ATOM, "atom")
+    ///         .finish_node()
+    ///     .finish_node()
+    ///     .finish();
+    /// parse_expr(&mut builder, 0.0, &mut tokens.into_iter().peekable());
+    /// let parsed_tree = builder.finish();
+    /// assert_eq!(parsed_tree, expected_tree);
+    /// ```
     pub fn checkpoint(&self) -> Checkpoint {
         Checkpoint(self.children.len())
     }

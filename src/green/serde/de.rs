@@ -22,82 +22,13 @@ use {
 /// - Otherwise, we get a borrowed string.
 ///   - If the string can be zero-copy deserialized, we borrow it from the deserializer.
 ///   - Otherwise, we copy it into an owned string just such that we can continue deserialization.
-struct Str<'a>(Cow<'a, str>);
-
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct Str<'a>(#[serde(borrow)] Cow<'a, str>);
 impl Deref for Str<'_> {
     type Target = str;
     fn deref(&self) -> &str {
         &self.0
-    }
-}
-
-impl<'de> Deserialize<'de> for Str<'de> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct StrVisitor;
-
-        impl<'de> Visitor<'de> for StrVisitor {
-            type Value = Str<'de>;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "a string")
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                Ok(Str(Cow::Owned(v.into())))
-            }
-
-            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                Ok(Str(Cow::Borrowed(v)))
-            }
-
-            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                Ok(Str(Cow::Owned(v)))
-            }
-
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                match str::from_utf8(v) {
-                    Ok(v) => Ok(Str(Cow::Owned(v.into()))),
-                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
-                }
-            }
-
-            fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                match str::from_utf8(v) {
-                    Ok(v) => Ok(Str(Cow::Borrowed(v))),
-                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
-                }
-            }
-
-            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                match String::from_utf8(v) {
-                    Ok(v) => Ok(Str(Cow::Owned(v))),
-                    Err(e) => Err(Error::invalid_value(Unexpected::Bytes(&e.into_bytes()), &self)),
-                }
-            }
-        }
-
-        deserializer.deserialize_string(StrVisitor)
     }
 }
 

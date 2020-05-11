@@ -1,7 +1,7 @@
 use {
     insta::{assert_json_snapshot, assert_ron_snapshot, assert_yaml_snapshot, with_settings},
     serde::{de::DeserializeSeed, Deserialize, Deserializer, Serialize, Serializer},
-    serde_test::{assert_tokens, Token as T},
+    serde_test::{assert_de_tokens, assert_tokens, Token as T},
     sorbus::*,
     std::{ptr, sync::Arc},
 };
@@ -11,6 +11,11 @@ use {
 #[derive(Debug, Eq, PartialEq)]
 struct Node {
     raw: Arc<green::Node>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct Token {
+    raw: Arc<green::Token>,
 }
 
 impl Serialize for Node {
@@ -28,6 +33,24 @@ impl<'de> Deserialize<'de> for Node {
         D: Deserializer<'de>,
     {
         Ok(Node { raw: green::Builder::new().deserialize_node().deserialize(deserializer)? })
+    }
+}
+
+impl Serialize for Token {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.raw.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Token {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Token { raw: green::Builder::new().deserialize_token().deserialize(deserializer)? })
     }
 }
 
@@ -59,36 +82,117 @@ fn make_tree() -> Node {
     make_tree_with(&mut green::TreeBuilder::new())
 }
 
-#[test]
-fn tree_de_serialization() {
-    #[rustfmt::skip]
-    assert_tokens(
-        &make_tree(),
-        &[
-            T::Struct { name: "Node", len: 2 },
+#[rustfmt::skip]
+const TREE_SER: &[T] = &[
+    T::Struct { name: "Node", len: 2 },
+        T::Str("kind"),
+            T::NewtypeStruct { name: "Kind" },
+                T::U16(2),
+        T::Str("children"),
+            T::Seq { len: Some(2) },
+                T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                    T::Str("kind"),
+                        T::NewtypeStruct { name: "Kind" },
+                            T::U16(0),
+                    T::Str("text"),
+                        T::Str("0"),
+                T::StructVariantEnd,
+                T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                    T::Str("kind"),
+                        T::NewtypeStruct { name: "Kind" },
+                            T::U16(1),
+                    T::Str("text"),
+                        T::Str("1"),
+                T::StructVariantEnd,
+            T::SeqEnd,
+    T::StructEnd,
+];
+
+#[rustfmt::skip]
+const TREE_SEQ: &[T] = &[
+    T::Seq { len: Some(2) },
+        T::NewtypeStruct { name: "Kind" },
+            T::U16(2),
+        T::Seq { len: Some(2) },
+            T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
                 T::Str("kind"),
                     T::NewtypeStruct { name: "Kind" },
-                        T::U16(2),
-                T::Str("children"),
-                    T::Seq { len: Some(2) },
-                        T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
-                            T::Str("kind"),
-                                T::NewtypeStruct { name: "Kind" },
-                                    T::U16(0),
-                            T::Str("text"),
-                                T::Str("0"),
-                        T::StructVariantEnd,
-                        T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
-                            T::Str("kind"),
-                                T::NewtypeStruct { name: "Kind" },
-                                    T::U16(1),
-                            T::Str("text"),
-                                T::Str("1"),
-                        T::StructVariantEnd,
-                    T::SeqEnd,
-            T::StructEnd,
-        ]
-    );
+                        T::U16(0),
+                T::Str("text"),
+                    T::Str("0"),
+            T::StructVariantEnd,
+            T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                T::Str("kind"),
+                    T::NewtypeStruct { name: "Kind" },
+                        T::U16(1),
+                T::Str("text"),
+                    T::Str("1"),
+            T::StructVariantEnd,
+        T::SeqEnd,
+    T::SeqEnd,
+];
+
+#[rustfmt::skip]
+const YODA_SER: &[T] = &[
+    T::Struct { name: "Node", len: 2 },
+        T::Str("children"),
+            T::Seq { len: Some(2) },
+                T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                    T::Str("text"),
+                        T::Str("0"),
+                    T::Str("kind"),
+                        T::NewtypeStruct { name: "Kind" },
+                            T::U16(0),
+                T::StructVariantEnd,
+                T::StructVariant { name: "NodeOrToken", variant: "Token", len: 2 },
+                    T::Str("text"),
+                        T::Str("1"),
+                    T::Str("kind"),
+                        T::NewtypeStruct { name: "Kind" },
+                            T::U16(1),
+                T::StructVariantEnd,
+            T::SeqEnd,
+        T::Str("kind"),
+            T::NewtypeStruct { name: "Kind" },
+                T::U16(2),
+    T::StructEnd,
+];
+
+#[test]
+fn tree_de_serialization() {
+    assert_tokens(&make_tree(), TREE_SER);
+    assert_de_tokens(&make_tree(), TREE_SEQ);
+    assert_de_tokens(&make_tree(), YODA_SER);
+}
+
+fn make_token() -> Token {
+    Token { raw: green::Builder::new().token(Kind(!0), "no-this-is-patrick") }
+}
+
+#[rustfmt::skip]
+const TOKEN_SER: &[T] = &[
+    T::Struct { name: "Token", len: 2 },
+        T::Str("kind"),
+            T::NewtypeStruct { name: "Kind" },
+                T::U16(!0),
+        T::Str("text"),
+            T::Str("no-this-is-patrick"),
+    T::StructEnd,
+];
+
+#[rustfmt::skip]
+const TOKEN_SEQ: &[T] = &[
+    T::Seq { len: Some(2) },
+        T::NewtypeStruct { name: "Kind" },
+            T::U16(!0),
+        T::Str("no-this-is-patrick"),
+    T::SeqEnd,
+];
+
+#[test]
+fn token_de_serialization() {
+    assert_tokens(&make_token(), TOKEN_SER);
+    assert_de_tokens(&make_token(), TOKEN_SEQ);
 }
 
 #[test]
@@ -108,36 +212,44 @@ fn assert_serialization_formats() {
 
 #[test]
 fn deduplication_of_nodes_happens() {
-    let tree_json = r##"{
-        "kind": 2,
+    let tree_json = r#"{
+  "kind": 2,
+  "children": [
+    {
+      "Node": {
+        "kind": 1,
         "children": [
-            {"Node":{
-                "kind": 1,
-                "children": [
-                    {"Token":{
-                        "kind": 0,
-                        "text": " "
-                    }}
-                ]
-            }},
-            {"Node":{
-                "kind": 1,
-                "children": [
-                    {"Token":{
-                        "kind": 0,
-                        "text": " "
-                    }}
-                ]
-            }}
+          {
+            "Token": {
+              "kind": 0,
+              "text": " "
+            }
+          }
         ]
-    }"##;
+      }
+    },
+    {
+      "Node": {
+        "kind": 1,
+        "children": [
+          {
+            "Token": {
+              "kind": 0,
+              "text": " "
+            }
+          }
+        ]
+      }
+    }
+  ]
+}"#;
 
     // without SeqAccess::size_hint
     let node: Node = serde_json::from_str(tree_json).unwrap();
     let mut children = node.raw.children();
     assert!(ptr::eq(
         &*children.next().unwrap().unwrap_node(),
-        &*children.next().unwrap().unwrap_node()
+        &*children.next().unwrap().unwrap_node(),
     ));
 
     // with SeqAccess::size_hint
@@ -145,6 +257,40 @@ fn deduplication_of_nodes_happens() {
     let mut children = node.raw.children();
     assert!(ptr::eq(
         &*children.next().unwrap().unwrap_node(),
-        &*children.next().unwrap().unwrap_node()
+        &*children.next().unwrap().unwrap_node(),
     ));
+
+    let reserialized = serde_json::to_string_pretty(&node).unwrap();
+    assert_eq!(tree_json, reserialized);
+}
+
+#[test]
+fn deduplication_of_tokens_happens() {
+    let tree_json = r#"{
+  "kind": 2,
+  "children": [
+    {
+      "Token": {
+        "kind": 0,
+        "text": " "
+      }
+    },
+    {
+      "Token": {
+        "kind": 0,
+        "text": " "
+      }
+    }
+  ]
+}"#;
+
+    let node: Node = serde_json::from_str(tree_json).unwrap();
+    let mut children = node.raw.children();
+    assert!(ptr::eq(
+        &*children.next().unwrap().unwrap_token(),
+        &*children.next().unwrap().unwrap_token(),
+    ));
+
+    let reserialized = serde_json::to_string_pretty(&node).unwrap();
+    assert_eq!(tree_json, reserialized);
 }
