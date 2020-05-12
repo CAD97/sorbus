@@ -50,6 +50,7 @@ impl hash::Hash for Node {
 
 // Element is a union, so we have to make sure to drop them manually here.
 impl Drop for Node {
+    #[inline]
     fn drop(&mut self) {
         /// Queue this node's children to be dropped if this is the last handle,
         /// then drop the reference counted handle (freeing the node itself),
@@ -114,16 +115,19 @@ impl Node {
     }
 
     /// The kind of this node.
+    #[inline]
     pub fn kind(&self) -> Kind {
         self.kind
     }
 
     /// The length of text at this node.
+    #[inline]
     pub fn len(&self) -> TextSize {
         self.text_len
     }
 
     /// Child elements of this node.
+    #[inline]
     pub fn children(&self) -> Children<'_> {
         unsafe { Children::new(&self.children) }
     }
@@ -135,6 +139,7 @@ impl Node {
     /// # Panics
     ///
     /// Panics if the given offset is outside of this node.
+    #[inline]
     pub fn index_of_offset(&self, offset: TextSize) -> usize {
         assert!(offset < self.len());
         self.children

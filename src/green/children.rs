@@ -38,6 +38,7 @@ macro_rules! impl_children_iter {
     ($T:ident of $Item:ty) => {
         impl<'a> $T<'a> {
             /// Get the next item in the iterator without advancing it.
+            #[inline]
             pub fn peek(&self) -> Option<<Self as Iterator>::Item> {
                 let element = self.inner.as_slice().first()?;
                 if self.full_align {
@@ -48,6 +49,7 @@ macro_rules! impl_children_iter {
             }
 
             /// Get the nth item in the iterator without advancing it.
+            #[inline]
             pub fn get(&self, n: usize) -> Option<<Self as Iterator>::Item> {
                 let element = self.inner.as_slice().get(n)?;
                 let full_align = self.full_align ^ (n % 2 == 1);
@@ -66,6 +68,7 @@ macro_rules! impl_children_iter {
             /// # Panics
             ///
             /// Panics if `mid > len`.
+            #[inline]
             pub fn split_at(&self, mid: usize) -> (Self, Self) {
                 let (left, right) = self.inner.as_slice().split_at(mid);
                 let left_full_align = self.full_align;
@@ -80,6 +83,7 @@ macro_rules! impl_children_iter {
         impl<'a> Iterator for $T<'a> {
             type Item = $Item;
 
+            #[inline]
             fn next(&mut self) -> Option<Self::Item> {
                 let element = self.inner.next()?;
                 let full_align = self.full_align;
@@ -91,18 +95,22 @@ macro_rules! impl_children_iter {
                 }
             }
 
+            #[inline]
             fn size_hint(&self) -> (usize, Option<usize>) {
                 self.inner.size_hint()
             }
 
+            #[inline]
             fn count(self) -> usize {
                 self.inner.count()
             }
 
+            #[inline]
             fn last(mut self) -> Option<Self::Item> {
                 self.next_back()
             }
 
+            #[inline]
             fn nth(&mut self, n: usize) -> Option<Self::Item> {
                 let element = self.inner.nth(n)?;
                 let full_align = self.full_align ^ (n % 2 == 1);
@@ -114,6 +122,7 @@ macro_rules! impl_children_iter {
                 }
             }
 
+            #[inline]
             fn fold<B, F>(mut self, init: B, mut f: F) -> B
             where
                 F: FnMut(B, Self::Item) -> B,
@@ -149,13 +158,14 @@ macro_rules! impl_children_iter {
         }
 
         impl ExactSizeIterator for $T<'_> {
-            #[inline(always)]
+            #[inline]
             fn len(&self) -> usize {
                 self.inner.len()
             }
         }
 
         impl DoubleEndedIterator for $T<'_> {
+            #[inline]
             fn next_back(&mut self) -> Option<Self::Item> {
                 let element = self.inner.next_back()?;
                 // self.len() is now the index of the element popped from the back
@@ -168,6 +178,7 @@ macro_rules! impl_children_iter {
                 }
             }
 
+            #[inline]
             fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
                 let element = self.inner.nth_back(n)?;
                 // self.len() is now the index of the element popped from the back
@@ -190,6 +201,7 @@ impl_children_iter!(ChildrenWithOffsets of (TextSize, NodeOrToken<ArcBorrow<'a, 
 
 impl<'a> Children<'a> {
     /// Iterate the children with their offsets from the parent node.
+    #[inline]
     pub fn with_offsets(&self) -> ChildrenWithOffsets<'a> {
         ChildrenWithOffsets { inner: self.inner.clone(), full_align: self.full_align }
     }
@@ -197,6 +209,7 @@ impl<'a> Children<'a> {
 
 impl<'a> ChildrenWithOffsets<'a> {
     /// Iterate the children without their offsets.
+    #[inline]
     pub fn without_offsets(&self) -> Children<'a> {
         Children { inner: self.inner.clone(), full_align: self.full_align }
     }
