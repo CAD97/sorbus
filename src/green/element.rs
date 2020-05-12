@@ -211,7 +211,14 @@ impl Debug for Element {
 impl Eq for Element {}
 impl PartialEq for Element {
     fn eq(&self, other: &Self) -> bool {
-        self.ptr() == other.ptr() && self.offset() == other.offset()
+        unsafe {
+            match (self.is_full_aligned(), other.is_full_aligned()) {
+                (true, true) => self.full_aligned() == other.full_aligned(),
+                (true, false) => self.full_aligned() == other.half_aligned(),
+                (false, true) => self.half_aligned() == other.half_aligned(),
+                (false, false) => self.half_aligned() == other.half_aligned(),
+            }
+        }
     }
 }
 
@@ -244,6 +251,7 @@ macro_rules! impl_element {
             }
         }
 
+        impl Eq for $Element {}
         impl PartialEq<FullAlignedElement> for $Element {
             fn eq(&self, other: &FullAlignedElement) -> bool {
                 self.ptr() == other.ptr() && self.offset() == other.offset()
