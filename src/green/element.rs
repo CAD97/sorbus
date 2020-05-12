@@ -211,7 +211,14 @@ impl Debug for Element {
 impl Eq for Element {}
 impl PartialEq for Element {
     fn eq(&self, other: &Self) -> bool {
-        self.ptr() == other.ptr() && self.offset() == other.offset()
+        unsafe {
+            match (self.is_full_aligned(), other.is_full_aligned()) {
+                (true, true) => self.full_aligned() == other.full_aligned(),
+                (true, false) => self.full_aligned() == other.half_aligned(),
+                (false, true) => self.half_aligned() == other.half_aligned(),
+                (false, false) => self.half_aligned() == other.half_aligned(),
+            }
+        }
     }
 }
 
@@ -244,6 +251,7 @@ macro_rules! impl_element {
             }
         }
 
+        impl Eq for $Element {}
         impl PartialEq<FullAlignedElement> for $Element {
             fn eq(&self, other: &FullAlignedElement) -> bool {
                 self.ptr() == other.ptr() && self.offset() == other.offset()
@@ -313,24 +321,5 @@ impl HalfAlignedElement {
         ptr::write(ptr, offset);
         let ptr = ptr.add(1).cast();
         ptr::write(ptr, element);
-    }
-}
-
-impl<'a> From<&'a Element> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>> {
-    fn from(this: &'a Element) -> Self {
-        let this = this.ptr();
-        None.or_else(|| this.with_a(|&node| NodeOrToken::Node(node)))
-            .or_else(|| this.with_b(|&token| NodeOrToken::Token(token)))
-            .unwrap()
-    }
-}
-
-impl<'a> From<&'a Element> for (TextSize, NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>) {
-    fn from(this: &'a Element) -> Self {
-        if this.is_full_aligned() {
-            unsafe { this.full_aligned().into() }
-        } else {
-            unsafe { this.half_aligned().into() }
-        }
     }
 }
