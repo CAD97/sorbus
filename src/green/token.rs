@@ -38,16 +38,19 @@ impl hash::Hash for Token {
 #[allow(clippy::len_without_is_empty)]
 impl Token {
     /// The kind of this token.
+    #[inline]
     pub fn kind(&self) -> Kind {
         self.kind
     }
 
     /// The text of this token.
+    #[inline]
     pub fn text(&self) -> &str {
         &self.text
     }
 
     /// The length of text at this token.
+    #[inline]
     pub fn len(&self) -> TextSize {
         self.text_len
     }
