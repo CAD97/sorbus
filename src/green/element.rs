@@ -323,22 +323,3 @@ impl HalfAlignedElement {
         ptr::write(ptr, element);
     }
 }
-
-impl<'a> From<&'a Element> for NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>> {
-    fn from(this: &'a Element) -> Self {
-        let this = this.ptr();
-        None.or_else(|| this.with_a(|&node| NodeOrToken::Node(node)))
-            .or_else(|| this.with_b(|&token| NodeOrToken::Token(token)))
-            .unwrap()
-    }
-}
-
-impl<'a> From<&'a Element> for (TextSize, NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>) {
-    fn from(this: &'a Element) -> Self {
-        if this.is_full_aligned() {
-            unsafe { this.full_aligned().into() }
-        } else {
-            unsafe { this.half_aligned().into() }
-        }
-    }
-}
