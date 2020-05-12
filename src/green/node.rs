@@ -2,12 +2,15 @@
 
 use {
     crate::{
-        green::{Children, Element, FullAlignedElement, HalfAlignedElement, Token},
+        green::{
+            unpack_node_or_token, Children, Element, FullAlignedElement, HalfAlignedElement,
+            PackedNodeOrToken,
+        },
         layout_polyfill::LayoutPolyfill,
-        Kind, NodeOrToken, TextSize,
+        Kind, TextSize,
     },
     erasable::{Erasable, ErasedPtr},
-    ptr_union::{Enum2, Union2},
+    ptr_union::Enum2,
     slice_dst::{AllocSliceDst, SliceDst, TryAllocSliceDst},
     std::{alloc::Layout, hash, mem::ManuallyDrop, ptr, sync::Arc, u16},
 };
@@ -59,13 +62,12 @@ impl Drop for Node {
         /// The node will still be properly dropped, just by calling its destructor
         /// rather than taking its children into the iterative drop list.
         fn maybe_drop_into(mut this: Arc<Node>, stack: &mut Vec<Arc<Node>>) {
-            if Arc::get_mut(&mut this).is_some() {
+            if let Some(node) = Arc::get_mut(&mut this) {
                 unsafe {
-                    // Skip running the node's destructor,
-                    let mut this: Arc<ManuallyDrop<Node>> =
-                        Arc::from_raw(Arc::into_raw(this) as *const _);
-                    // But queue all of the children to be destructed.
-                    drop_into(Arc::get_mut/*_unchecked*/(&mut this).unwrap(), stack)
+                    // Queue all of the children to be destructed, and
+                    drop_into(node, stack);
+                    // Skip running the node's destructor.
+                    Arc::<ManuallyDrop<Node>>::from_raw(Arc::into_raw(this) as *const _);
                 }
             } else {
                 // NB: May actually be the last Arc, if above `Arc::get_mut` races with another thread.
@@ -84,9 +86,8 @@ impl Drop for Node {
         /// after calling this function.
         unsafe fn drop_into(this: &mut Node, stack: &mut Vec<Arc<Node>>) {
             let mut children = this.children.iter_mut();
-            let mut enqueue = |pack: Union2<Arc<Node>, Arc<Token>>| match pack.unpack() {
-                Enum2::A(node) => stack.push(node),
-                Enum2::B(token) => drop(token),
+            let mut enqueue = |pack: PackedNodeOrToken| {
+                unpack_node_or_token(pack).map(|node| stack.push(node), drop)
             };
             (|| -> Option<()> {
                 loop {
@@ -162,9 +163,12 @@ impl ChildrenWriter {
         ChildrenWriter { raw, len: 0, text_len: 0.into() }
     }
 
-    unsafe fn push(&mut self, element: NodeOrToken<Arc<Node>, Arc<Token>>) {
+    unsafe fn push(&mut self, element: PackedNodeOrToken) {
         let offset = self.text_len;
-        self.text_len += element.as_deref().map(Node::len, Token::len).flatten();
+        self.text_len += match element.as_deref_unchecked().unpack() {
+            Enum2::A(node) => node.len(),
+            Enum2::B(token) => token.len(),
+        };
         if self.len % 2 == 0 {
             FullAlignedElement::write(self.raw.add(self.len), element, offset);
         } else {
@@ -191,13 +195,11 @@ impl Node {
     }
 
     #[allow(clippy::new_ret_no_self)]
-    pub(super) fn new<A, I>(kind: Kind, children: I) -> A
+    pub(super) fn new<A, I>(kind: Kind, mut children: I) -> A
     where
         A: AllocSliceDst<Self>,
-        I: IntoIterator<Item = NodeOrToken<Arc<Node>, Arc<Token>>>,
-        I::IntoIter: ExactSizeIterator,
+        I: Iterator<Item = PackedNodeOrToken> + ExactSizeIterator,
     {
-        let mut children = children.into_iter();
         let len = children.len();
         assert!(len <= u16::MAX as usize, "more children than fit in one node");
         let children_len = len as u16;
@@ -214,8 +216,7 @@ impl Node {
 
                 let mut children_writer = ChildrenWriter::new(raw.add(children_offset).cast());
                 for _ in 0..len {
-                    let child: NodeOrToken<Arc<Node>, Arc<Token>> =
-                        children.next().expect("children iterator over-reported length");
+                    let child = children.next().expect("children iterator over-reported length");
                     children_writer.push(child);
                 }
                 assert!(children.next().is_none(), "children iterator under-reported length");
@@ -228,13 +229,11 @@ impl Node {
     }
 
     #[allow(clippy::new_ret_no_self)]
-    pub(super) fn try_new<A, I, E>(kind: Kind, children: I) -> Result<A, E>
+    pub(super) fn try_new<A, I, E>(kind: Kind, mut children: I) -> Result<A, E>
     where
         A: TryAllocSliceDst<Self>,
-        I: IntoIterator<Item = Result<NodeOrToken<Arc<Node>, Arc<Token>>, E>>,
-        I::IntoIter: ExactSizeIterator,
+        I: Iterator<Item = Result<PackedNodeOrToken, E>> + ExactSizeIterator,
     {
-        let mut children = children.into_iter();
         let len = children.len();
         assert!(len <= u16::MAX as usize, "more children than fit in one node");
         let children_len = len as u16;
@@ -251,8 +250,7 @@ impl Node {
 
                 let mut children_writer = ChildrenWriter::new(raw.add(children_offset).cast());
                 for _ in 0..len {
-                    let child: NodeOrToken<Arc<Node>, Arc<Token>> =
-                        children.next().expect("children iterator over-reported length")?;
+                    let child = children.next().expect("children iterator over-reported length")?;
                     children_writer.push(child);
                 }
                 assert!(children.next().is_none(), "children iterator under-reported length");

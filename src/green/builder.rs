@@ -1,6 +1,6 @@
 use {
     crate::{
-        green::{Node, Token},
+        green::{pack_node_or_token, unpack_node_or_token, Node, PackedNodeOrToken, Token},
         Kind, NodeOrToken,
     },
     hashbrown::{hash_map::RawEntryMut, HashMap, HashSet},
@@ -69,7 +69,15 @@ impl Builder {
         I::Item: Into<NodeOrToken<Arc<Node>, Arc<Token>>>,
         I::IntoIter: ExactSizeIterator,
     {
-        let node = Node::new(kind, children.into_iter().map(Into::into));
+        self.node_packed(kind, children.into_iter().map(Into::into).map(pack_node_or_token))
+    }
+
+    /// Version of `Builder::node` taking a pre-packed child element iterator.
+    pub(super) fn node_packed<I>(&mut self, kind: Kind, children: I) -> Arc<Node>
+    where
+        I: Iterator<Item = PackedNodeOrToken> + ExactSizeIterator,
+    {
+        let node = Node::new(kind, children);
         self.cache_node(node)
     }
 
@@ -116,7 +124,7 @@ pub struct Checkpoint(usize);
 pub struct TreeBuilder {
     cache: Builder,
     stack: Vec<(Kind, usize)>,
-    children: Vec<NodeOrToken<Arc<Node>, Arc<Token>>>,
+    children: Vec<PackedNodeOrToken>,
 }
 
 impl TreeBuilder {
@@ -137,7 +145,7 @@ impl TreeBuilder {
 
     /// Add an element to the current branch.
     pub fn add(&mut self, element: impl Into<NodeOrToken<Arc<Node>, Arc<Token>>>) -> &mut Self {
-        self.children.push(element.into());
+        self.children.push(pack_node_or_token(element.into()));
         self
     }
 
@@ -171,7 +179,7 @@ impl TreeBuilder {
         });
         let children = self.children.drain(first_child..);
         // NB: inline Self::node here because of borrow on `self.children`
-        let node = self.cache.node(kind, children);
+        let node = self.cache.node_packed(kind, children);
         self.add(node)
     }
 
@@ -260,6 +268,34 @@ impl TreeBuilder {
         self
     }
 
+    /// Finish the current branch up to a given checkpoint,
+    /// and restore its parent as current.
+    ///
+    /// Any nodes after the used checkpoint will be shifted from the
+    /// current branch to its parent, after the newly finished node.
+    ///
+    /// Prefer using regular `finish_node` and delaying adding branches
+    /// when possible, as its operations on the underlying buffer are
+    /// marginally more efficient and involve less moving of elements.
+    pub fn finish_node_at(&mut self, Checkpoint(checkpoint): Checkpoint) -> &mut Self {
+        assert!(
+            checkpoint <= self.children.len(),
+            "checkpoint no longer valid; was `finish_node` called early?",
+        );
+
+        let (kind, first_child) = self.stack.pop().unwrap_or_else(|| {
+            panic!("called `TreeBuilder::finish_node_at` without paired `start_node`")
+        });
+        assert!(
+            checkpoint >= first_child,
+            "checkpoint no longer valid; was an unmatched `start_node` called?",
+        );
+        let children = self.children.drain(first_child..checkpoint);
+        // NB: inline Self::node here because of borrow on `self.children`
+        let node = self.cache.node_packed(kind, children);
+        self.add(node)
+    }
+
     /// Complete the current tree building.
     ///
     /// This `TreeBuilder` is reset and can be used to build a new tree.
@@ -271,7 +307,7 @@ impl TreeBuilder {
     pub fn finish(&mut self) -> Arc<Node> {
         assert!(self.stack.is_empty());
         assert_eq!(self.children.len(), 1);
-        self.children.pop().unwrap().into_node().unwrap()
+        unpack_node_or_token(self.children.pop().unwrap()).into_node().unwrap()
     }
 
     /// Destroy this tree builder and recycle its build cache.

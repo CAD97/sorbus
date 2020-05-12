@@ -4,7 +4,7 @@ extern crate serde; // this line required to workaround rust-lang/rust#55779
 
 use {
     crate::{
-        green::{Builder, Node, Token},
+        green::{pack_node_or_token, Builder, Node, PackedNodeOrToken, Token},
         Kind, NodeOrToken,
     },
     rc_box::ArcBox,
@@ -285,28 +285,6 @@ impl<'de> Visitor<'de> for NodeChildrenSeed<'_> {
         Seq: SeqAccess<'de>,
     {
         if seq.size_hint().is_some() {
-            struct SeqAccessExactSizeIterator<'a, 'de, Seq: SeqAccess<'de>>(
-                &'a mut Builder,
-                Seq,
-                PhantomData<&'de ()>,
-            );
-            impl<'de, Seq: SeqAccess<'de>> Iterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
-                type Item = Result<NodeOrToken<Arc<Node>, Arc<Token>>, Seq::Error>;
-                fn next(&mut self) -> Option<Self::Item> {
-                    self.1.next_element_seed(ElementSeed(self.0)).transpose()
-                }
-
-                fn size_hint(&self) -> (usize, Option<usize>) {
-                    let len = self.len();
-                    (len, Some(len))
-                }
-            }
-            impl<'de, Seq: SeqAccess<'de>> ExactSizeIterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
-                fn len(&self) -> usize {
-                    self.1.size_hint().unwrap()
-                }
-            }
-
             let node =
                 Node::try_new(Kind(0), SeqAccessExactSizeIterator(self.0, seq, PhantomData))?;
             Ok(node)
@@ -315,14 +293,36 @@ impl<'de> Visitor<'de> for NodeChildrenSeed<'_> {
             while let Some(element) = seq.next_element_seed(ElementSeed(self.0))? {
                 children.push(element);
             }
-            Ok(Node::new(Kind(0), children))
+            Ok(Node::new(Kind(0), children.into_iter()))
         }
+    }
+}
+
+struct SeqAccessExactSizeIterator<'a, 'de, Seq: SeqAccess<'de>>(
+    &'a mut Builder,
+    Seq,
+    PhantomData<&'de ()>,
+);
+impl<'de, Seq: SeqAccess<'de>> Iterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
+    type Item = Result<PackedNodeOrToken, Seq::Error>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.1.next_element_seed(ElementSeed(self.0)).transpose()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+impl<'de, Seq: SeqAccess<'de>> ExactSizeIterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
+    fn len(&self) -> usize {
+        self.1.size_hint().unwrap()
     }
 }
 
 struct ElementSeed<'a>(&'a mut Builder);
 impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
-    type Value = NodeOrToken<Arc<Node>, Arc<Token>>;
+    type Value = PackedNodeOrToken;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -333,7 +333,7 @@ impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
     }
 }
 impl<'de> Visitor<'de> for ElementSeed<'_> {
-    type Value = NodeOrToken<Arc<Node>, Arc<Token>>;
+    type Value = PackedNodeOrToken;
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "a sorbus green node or token")
     }
@@ -349,13 +349,13 @@ impl<'de> Visitor<'de> for ElementSeed<'_> {
             Token,
         }
 
-        match data.variant()? {
-            (Variant::Node, variant) => Ok(NodeOrToken::Node(
-                variant.struct_variant(&["kind", "children"], NodeSeed(self.0))?,
-            )),
-            (Variant::Token, variant) => Ok(NodeOrToken::Token(
-                variant.struct_variant(&["kind", "text"], TokenSeed(self.0))?,
-            )),
-        }
+        Ok(pack_node_or_token(match data.variant()? {
+            (Variant::Node, variant) => {
+                NodeOrToken::Node(variant.struct_variant(&["kind", "children"], NodeSeed(self.0))?)
+            }
+            (Variant::Token, variant) => {
+                NodeOrToken::Token(variant.struct_variant(&["kind", "text"], TokenSeed(self.0))?)
+            }
+        }))
     }
 }
