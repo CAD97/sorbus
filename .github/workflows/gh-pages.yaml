@@ -1,4 +1,4 @@
-name: Rustdoc publish
+name: Rustdoc
 on:
   push:
     branches:
@@ -6,7 +6,7 @@ on:
 
 jobs:
   gh-pages:
-    name: gh-pages Documentation Deploy
+    name: Deploy
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
