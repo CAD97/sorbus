@@ -10,6 +10,14 @@ use {
 ///
 /// This iterator is cheap to clone (basically a copy),
 /// and random access (`get` or `nth`) is constant time.
+///
+/// # Performance note
+///
+/// Internal iteration (`fold`, `for_each`; the callback iteration APIs)
+/// is much more performant than external iteration (`for`, `next`)
+/// for this iterator: up to 20-30% better (depending on how you measure)
+/// for straight-line children iteration, and approximately 10% better for a
+/// more usual tree visitor pattern that descends into transitive children.
 #[derive(Debug, Clone)]
 pub struct Children<'a> {
     inner: slice::Iter<'a, Element>,
@@ -20,6 +28,14 @@ pub struct Children<'a> {
 ///
 /// This iterator is cheap to clone (basically a copy),
 /// and random access (`get` or `nth`) is constant time.
+///
+/// # Performance note
+///
+/// Internal iteration (`fold`, `for_each`; the callback iteration APIs)
+/// is much more performant than external iteration (`for`, `next`)
+/// for this iterator: up to 20-30% better (depending on how you measure)
+/// for straight-line children iteration, and approximately 10% better for a
+/// more usual tree visitor pattern that descends into transitive children.
 #[derive(Debug, Clone)]
 pub struct ChildrenWithOffsets<'a> {
     inner: slice::Iter<'a, Element>,
@@ -98,6 +114,18 @@ macro_rules! impl_children_iter {
             where
                 F: FnMut(B, Self::Item) -> B,
             {
+                // Nota Bene: this is performance-sensitive iteration code.
+                // Seemingly minor refactorings can have large impacts on the
+                // throughput of this code; make sure to run the benchmarks!
+
+                // For example, changing the below loop from
+                //    if condition { B(); }
+                //    loop { A(); B(); }
+                // to the current (as of PR#37, and this comment)
+                //    if condition { loop { B(); A(); } }
+                //    else         { loop { A(); B(); } }
+                // led to a 10%(!) difference in benchmark throughput.
+
                 let mut accum = init;
 
                 let mut el;
