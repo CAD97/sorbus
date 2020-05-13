@@ -21,7 +21,7 @@ impl Debug for Kind {
 
 /// Enum wrapping either a node or a token.
 #[allow(missing_docs)]
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum NodeOrToken<Node, Token> {
     Node(Node),
     Token(Token),
@@ -88,6 +88,14 @@ impl<Node, Token> NodeOrToken<Node, Token> {
         Token: Deref,
     {
         self.as_ref().map(Deref::deref, Deref::deref)
+    }
+
+    pub fn kind(&self) -> Kind
+    where
+        Node: Deref<Target = GreenNode>,
+        Token: Deref<Target = GreenToken>,
+    {
+        self.as_deref().map(GreenNode::kind, GreenToken::kind).flatten()
     }
 }
 

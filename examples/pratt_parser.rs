@@ -22,7 +22,7 @@ const ATOM: Kind = Kind(0);
 const OP: Kind = Kind(1);
 const WS: Kind = Kind(2);
 // node kinds
-const EXPR: Kind = Kind(3);
+const EXPR: Kind = Kind(3); // normally you'd probably have different expression types
 
 #[derive(Debug)]
 struct Lexer<'src> {
@@ -75,8 +75,7 @@ impl<'src> Lexer<'src> {
     }
 }
 
-// It's no s-expressions, but it will do.
-fn dump(node: &green::Node) -> String {
+fn to_sexpr(node: &green::Node) -> String {
     fn display<'a>(
         el: NodeOrToken<&'a green::Node, &'a green::Token>,
         f: &'a mut dyn fmt::Write,
@@ -84,16 +83,20 @@ fn dump(node: &green::Node) -> String {
         match el {
             NodeOrToken::Token(token) => write!(f, "{}", token.text())?,
             NodeOrToken::Node(node) => {
-                assert_eq!(node.kind(), EXPR);
-                let complex = node.children().any(|child| child.is_node());
-                if complex {
-                    write!(f, "⟪")?;
-                }
-                for child in node.children() {
-                    display(child.as_deref(), f)?;
-                }
-                if complex {
-                    write!(f, "⟫")?;
+                let children_of_interest: Vec<_> =
+                    node.children().filter(|el| el.kind() != WS).collect();
+                if children_of_interest.len() == 1 {
+                    display(children_of_interest[0].as_deref(), f)?;
+                } else {
+                    f.write_str("(")?;
+                    for op in children_of_interest.iter().filter(|e| e.kind() == OP) {
+                        display(op.as_deref(), f)?;
+                    }
+                    for expr in children_of_interest.iter().filter(|e| e.kind() == EXPR) {
+                        f.write_str(" ")?;
+                        display(expr.as_deref(), f)?;
+                    }
+                    f.write_str(")")?;
                 }
             }
         }
@@ -214,43 +217,43 @@ fn infix_binding_power(op: &str) -> Option<(u8, u8)> {
 #[test]
 fn tests() {
     let s = expr("1");
-    assert_eq!(dump(&s), "1");
+    assert_eq!(to_sexpr(&s), "1");
 
     let s = expr("1 + 2 * 3");
-    assert_eq!(dump(&s), "⟪1 + ⟪2 * 3⟫⟫");
+    assert_eq!(to_sexpr(&s), "(+ 1 (* 2 3))");
 
     let s = expr("a + b * c * d + e");
-    assert_eq!(dump(&s), "⟪⟪a + ⟪⟪b * c⟫ * d⟫⟫ + e⟫");
+    assert_eq!(to_sexpr(&s), "(+ (+ a (* (* b c) d)) e)");
 
     let s = expr("f . g . h");
-    assert_eq!(dump(&s), "⟪f . ⟪g . h⟫⟫");
+    assert_eq!(to_sexpr(&s), "(. f (. g h))");
 
     let s = expr("1 + 2 + f . g . h * 3 * 4");
-    assert_eq!(dump(&s), "⟪⟪1 + 2⟫ + ⟪⟪⟪f . ⟪g . h⟫⟫ * 3⟫ * 4⟫⟫");
+    assert_eq!(to_sexpr(&s), "(+ (+ 1 2) (* (* (. f (. g h)) 3) 4))");
 
     let s = expr("--1 * 2");
-    assert_eq!(dump(&s), "⟪⟪-⟪-1⟫⟫ * 2⟫");
+    assert_eq!(to_sexpr(&s), "(* (- (- 1)) 2)");
 
     let s = expr("--f . g");
-    assert_eq!(dump(&s), "⟪-⟪-⟪f . g⟫⟫⟫");
+    assert_eq!(to_sexpr(&s), "(- (- (. f g)))");
 
     let s = expr("-9!");
-    assert_eq!(dump(&s), "⟪-⟪9!⟫⟫");
+    assert_eq!(to_sexpr(&s), "(- (! 9))");
 
     let s = expr("f . g !");
-    assert_eq!(dump(&s), "⟪⟪f . g⟫ !⟫");
+    assert_eq!(to_sexpr(&s), "(! (. f g))");
 
     let s = expr("(((0)))");
-    assert_eq!(dump(&s), "⟪(⟪(⟪(0)⟫)⟫)⟫");
+    assert_eq!(to_sexpr(&s), "(() (() (() 0)))");
 
     let s = expr("x[0][1]");
-    assert_eq!(dump(&s), "⟪⟪x[0]⟫[1]⟫");
+    assert_eq!(to_sexpr(&s), "([] ([] x 0) 1)");
 
     let s = expr("a ? b : c ? d : e");
-    assert_eq!(dump(&s), "⟪a ? b : ⟪c ? d : e⟫⟫");
+    assert_eq!(to_sexpr(&s), "(?: a b (?: c d e))");
 
     let s = expr("a = 0 ? b : c = d");
-    assert_eq!(dump(&s), "⟪a = ⟪⟪0 ? b : c⟫ = d⟫⟫")
+    assert_eq!(to_sexpr(&s), "(= a (= (?: 0 b c) d))")
 }
 
 fn main() -> std::io::Result<()> {
@@ -258,7 +261,7 @@ fn main() -> std::io::Result<()> {
     for line in std::io::stdin().lock().lines() {
         let line = line?;
         let s = expr(&line);
-        println!("{}", dump(&s));
+        println!("{}", to_sexpr(&s));
         println!("{:#?}", s);
         println!();
     }
