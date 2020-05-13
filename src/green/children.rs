@@ -13,7 +13,6 @@ use {
 #[derive(Debug, Clone)]
 pub struct Children<'a> {
     inner: slice::Iter<'a, Element>,
-    full_align: bool,
 }
 
 /// Children elements of a node in the immutable green tree,
@@ -24,13 +23,11 @@ pub struct Children<'a> {
 #[derive(Debug, Clone)]
 pub struct ChildrenWithOffsets<'a> {
     inner: slice::Iter<'a, Element>,
-    full_align: bool,
 }
 
 impl<'a> Children<'a> {
     pub(super) unsafe fn new(elements: &'a [Element]) -> Self {
-        assert!(elements.first().map(Element::is_full_aligned).unwrap_or(true));
-        Children { inner: elements.iter(), full_align: true }
+        Children { inner: elements.iter() }
     }
 }
 
@@ -41,23 +38,14 @@ macro_rules! impl_children_iter {
             #[inline]
             pub fn peek(&self) -> Option<<Self as Iterator>::Item> {
                 let element = self.inner.as_slice().first()?;
-                if self.full_align {
-                    unsafe { Some(element.full_aligned().into()) }
-                } else {
-                    unsafe { Some(element.half_aligned().into()) }
-                }
+                Some(element.into())
             }
 
             /// Get the nth item in the iterator without advancing it.
             #[inline]
             pub fn get(&self, n: usize) -> Option<<Self as Iterator>::Item> {
                 let element = self.inner.as_slice().get(n)?;
-                let full_align = self.full_align ^ (n % 2 == 1);
-                if full_align {
-                    unsafe { Some(element.full_aligned().into()) }
-                } else {
-                    unsafe { Some(element.half_aligned().into()) }
-                }
+                Some(element.into())
             }
 
             /// Divide this iterator into two at an index.
@@ -71,12 +59,7 @@ macro_rules! impl_children_iter {
             #[inline]
             pub fn split_at(&self, mid: usize) -> (Self, Self) {
                 let (left, right) = self.inner.as_slice().split_at(mid);
-                let left_full_align = self.full_align;
-                let right_full_align = self.full_align ^ (mid % 2 == 1);
-                (
-                    Self { inner: left.iter(), full_align: left_full_align },
-                    Self { inner: right.iter(), full_align: right_full_align },
-                )
+                (Self { inner: left.iter() }, Self { inner: right.iter() })
             }
         }
 
@@ -86,13 +69,7 @@ macro_rules! impl_children_iter {
             #[inline]
             fn next(&mut self) -> Option<Self::Item> {
                 let element = self.inner.next()?;
-                let full_align = self.full_align;
-                self.full_align = !full_align;
-                if full_align {
-                    unsafe { Some(element.full_aligned().into()) }
-                } else {
-                    unsafe { Some(element.half_aligned().into()) }
-                }
+                Some(element.into())
             }
 
             #[inline]
@@ -113,13 +90,7 @@ macro_rules! impl_children_iter {
             #[inline]
             fn nth(&mut self, n: usize) -> Option<Self::Item> {
                 let element = self.inner.nth(n)?;
-                let full_align = self.full_align ^ (n % 2 == 1);
-                self.full_align = !full_align;
-                if full_align {
-                    unsafe { Some(element.full_aligned().into()) }
-                } else {
-                    unsafe { Some(element.half_aligned().into()) }
-                }
+                Some(element.into())
             }
 
             #[inline]
@@ -129,29 +100,33 @@ macro_rules! impl_children_iter {
             {
                 let mut accum = init;
 
+                let mut el;
                 macro_rules! next {
-                    ($aligned:ident) => {
+                    () => {
                         if let Some(element) = self.inner.next() {
-                            unsafe { element.$aligned().into() }
+                            el = element;
                         } else {
-                            break accum;
+                            return accum;
                         }
                     };
                 }
 
-                if self.full_align {
-                    loop {
-                        let el = next!(full_aligned);
-                        accum = f(accum, el);
-                        let el = next!(half_aligned);
-                        accum = f(accum, el);
-                    }
-                } else {
-                    loop {
-                        let el = next!(half_aligned);
-                        accum = f(accum, el);
-                        let el = next!(full_aligned);
-                        accum = f(accum, el);
+                next!();
+                unsafe {
+                    if el.is_half_aligned() {
+                        loop {
+                            accum = f(accum, el.half_aligned().into());
+                            next!();
+                            accum = f(accum, el.full_aligned().into());
+                            next!();
+                        }
+                    } else {
+                        loop {
+                            accum = f(accum, el.full_aligned().into());
+                            next!();
+                            accum = f(accum, el.half_aligned().into());
+                            next!();
+                        }
                     }
                 }
             }
@@ -168,27 +143,13 @@ macro_rules! impl_children_iter {
             #[inline]
             fn next_back(&mut self) -> Option<Self::Item> {
                 let element = self.inner.next_back()?;
-                // self.len() is now the index of the element popped from the back
-                let full_align = self.full_align ^ (self.len() % 2 == 1);
-                // don't change self.full_align, the alignment of the head
-                if full_align {
-                    unsafe { Some(element.full_aligned().into()) }
-                } else {
-                    unsafe { Some(element.half_aligned().into()) }
-                }
+                Some(element.into())
             }
 
             #[inline]
             fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
                 let element = self.inner.nth_back(n)?;
-                // self.len() is now the index of the element popped from the back
-                let full_align = self.full_align ^ (self.len() % 2 == 1);
-                // don't change self.full_align, the alignment of the head
-                if full_align {
-                    unsafe { Some(element.full_aligned().into()) }
-                } else {
-                    unsafe { Some(element.half_aligned().into()) }
-                }
+                Some(element.into())
             }
         }
 
@@ -203,7 +164,7 @@ impl<'a> Children<'a> {
     /// Iterate the children with their offsets from the parent node.
     #[inline]
     pub fn with_offsets(&self) -> ChildrenWithOffsets<'a> {
-        ChildrenWithOffsets { inner: self.inner.clone(), full_align: self.full_align }
+        ChildrenWithOffsets { inner: self.inner.clone() }
     }
 }
 
@@ -211,6 +172,6 @@ impl<'a> ChildrenWithOffsets<'a> {
     /// Iterate the children without their offsets.
     #[inline]
     pub fn without_offsets(&self) -> Children<'a> {
-        Children { inner: self.inner.clone(), full_align: self.full_align }
+        Children { inner: self.inner.clone() }
     }
 }
