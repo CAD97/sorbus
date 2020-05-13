@@ -112,7 +112,10 @@ fn expr(input: &str) -> Arc<green::Node> {
     let mut lexer = Lexer::new(dbg!(input));
     expr_bp(&mut lexer, 0);
     eprintln!();
-    lexer.builder.finish()
+    let node = lexer.builder.finish();
+    let display = to_sexpr(&node);
+    eprintln!("{}", display);
+    node
 }
 
 fn expr_bp(lexer: &mut Lexer, min_bp: u8) {
@@ -123,6 +126,7 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) {
     match lexer.next() {
         Some(Token { kind: ATOM, src }) => {
             lexer.builder.token(ATOM, src);
+            eprint!("{} ", src);
         }
         Some(Token { kind: OP, src: "(" }) => {
             lexer.builder.token(OP, "(");
@@ -135,6 +139,7 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) {
             let ((), r_bp) = prefix_binding_power(src)
                 .unwrap_or_else(|| panic!("not a prefix token: {:?}", src));
             expr_bp(lexer, r_bp);
+            eprint!("({}) ", src);
         }
         t => panic!("bad token: {:?}", t),
     };
@@ -159,6 +164,9 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) {
                 expr_bp(lexer, 0);
                 assert_eq!(lexer.next(), Some(Token { kind: OP, src: "]" }));
                 lexer.builder.token(OP, "]");
+                eprint!("[] ");
+            } else {
+                eprint!("({}) ", op);
             }
 
         // infix operators
@@ -176,8 +184,12 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) {
                 assert_eq!(lexer.next(), Some(Token { kind: OP, src: ":" }));
                 lexer.builder.token(OP, ":");
                 lexer.eager_eat_ws();
+                expr_bp(lexer, r_bp);
+                eprint!("?: ");
+            } else {
+                expr_bp(lexer, r_bp);
+                eprint!("{} ", op);
             }
-            expr_bp(lexer, r_bp);
 
         // no more operators
         } else {
@@ -261,7 +273,6 @@ fn main() -> std::io::Result<()> {
     for line in std::io::stdin().lock().lines() {
         let line = line?;
         let s = expr(&line);
-        println!("{}", to_sexpr(&s));
         println!("{:#?}", s);
         println!();
     }
