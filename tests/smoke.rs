@@ -114,12 +114,15 @@ fn make_math_tree() {
     let n = |node: &Arc<green::Node>| NodeOrToken::from(node.clone());
     let t = |token: &Arc<green::Token>| NodeOrToken::from(token.clone());
 
+    // XXX Inaccurate comments for proof-of-concept direct use of slice views for less alloc XXX
     // We use vec![] as a quick and easy ExactSizeIterator.
     // Particular implementations may use specialized iterators for known child array lengths.
     // (Please, const-generic angels, give us `[_; N]: IntoIterator` sooner rather than later!)
-    let inner_mul = builder.node(EXPR, vec![n2, ws.clone(), mul, ws.clone(), n3]);
-    let left_add = builder.node(EXPR, vec![t(&n1), t(&ws), t(&add), t(&ws), n(&inner_mul)]);
-    let right_add = builder.node(EXPR, vec![n(&left_add), t(&ws), t(&add), t(&ws), t(&n4)]);
+    let inner_mul = builder.node(EXPR, vec![t(&n2), t(&ws), t(&mul), t(&ws), t(&n3)].into_iter());
+    let left_add =
+        builder.node(EXPR, vec![t(&n1), t(&ws), t(&add), t(&ws), n(&inner_mul)].into_iter());
+    let right_add =
+        builder.node(EXPR, vec![n(&left_add), t(&ws), t(&add), t(&ws), t(&n4)].into_iter());
 
     let tree = right_add;
 

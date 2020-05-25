@@ -4,6 +4,7 @@ use {
         AsSlice, Kind, NodeOrToken,
     },
     hashbrown::{hash_map::RawEntryMut, HashMap},
+    ptr_union::Enum2,
     std::{
         fmt,
         hash::{BuildHasher, Hash, Hasher},
@@ -16,28 +17,25 @@ use {
 struct ThinEqNode(Arc<Node>);
 
 impl Eq for ThinEqNode {}
-
 impl PartialEq for ThinEqNode {
     fn eq(&self, other: &Self) -> bool {
         self.0.kind() == other.0.kind()
-            // We include the len hash to potentially skip the children, even though it's derived.
-            && self.0.len() == other.0.len()
             && self.0.children().zip(other.0.children()).all(|pair| match pair {
-            (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &*rhs),
-            (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => lhs == rhs,
-            _ => false,
-        })
+                (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &*rhs),
+                (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => lhs == rhs,
+                _ => false,
+            })
     }
 }
 
 impl Hash for ThinEqNode {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.kind().hash(state);
-        // We can omit the len hash because it's derived from the children.
+        // We can omit `len` because it's derived from `children`.
         for child in self.0.children() {
             match child {
                 NodeOrToken::Node(node) => ptr::hash(&*node, state),
-                NodeOrToken::Token(token) => token.hash(state),
+                NodeOrToken::Token(token) => ptr::hash(&*token, state),
             }
         }
     }
@@ -74,9 +72,9 @@ impl fmt::Debug for Builder {
 }
 
 fn do_hash(hasher: &impl BuildHasher, hashee: &impl Hash) -> u64 {
-    let mut hasher = hasher.build_hasher();
-    hashee.hash(&mut hasher);
-    hasher.finish()
+    let mut state = hasher.build_hasher();
+    hashee.hash(&mut state);
+    state.finish()
 }
 
 impl Builder {
@@ -96,8 +94,37 @@ impl Builder {
             + ExactSizeIterator
             + AsSlice<NodeOrToken<Arc<Node>, Arc<Token>>>,
     {
-        let node = Node::new(kind, children.map(pack_node_or_token));
-        self.cache_node(node)
+        let hasher = &self.hasher;
+
+        let hash = {
+            // spoof ThinNodeEq's hash impl
+            let state = &mut hasher.build_hasher();
+            kind.hash(state);
+            for child in children.as_slice() {
+                match child {
+                    NodeOrToken::Node(node) => ptr::hash(&*node, state),
+                    NodeOrToken::Token(token) => ptr::hash(&*token, state),
+                }
+            }
+            state.finish()
+        };
+
+        let (ThinEqNode(node), ()) =
+            match self.nodes.raw_entry_mut().from_hash(hash, |ThinEqNode(node)| {
+                node.kind() == kind
+                    && node.children().zip(children.as_slice().iter()).all(|pair| match pair {
+                        (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &**rhs),
+                        (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => lhs == *rhs,
+                        _ => false,
+                    })
+            }) {
+                RawEntryMut::Occupied(entry) => entry.into_key_value(),
+                RawEntryMut::Vacant(entry) => {
+                    let node = Node::new(kind, children.map(pack_node_or_token));
+                    entry.insert_with_hasher(hash, ThinEqNode(node), (), |x| do_hash(hasher, x))
+                }
+            };
+        node.clone()
     }
 
     /// Version of `Builder::node` taking a pre-packed child element iterator.
@@ -105,8 +132,45 @@ impl Builder {
     where
         I: Iterator<Item = PackedNodeOrToken> + ExactSizeIterator + AsSlice<PackedNodeOrToken>,
     {
-        let node = Node::new(kind, children);
-        self.cache_node(node)
+        let hasher = &self.hasher;
+
+        let hash = {
+            // spoof ThinNodeEq's hash impl
+            let state = &mut hasher.build_hasher();
+            kind.hash(state);
+            for child in children.as_slice() {
+                match unsafe { child.as_deref_unchecked().unpack() } {
+                    Enum2::A(node) => ptr::hash(&*node, state),
+                    Enum2::B(token) => ptr::hash(&*token, state),
+                }
+            }
+            state.finish()
+        };
+
+        let (ThinEqNode(node), ()) =
+            match self.nodes.raw_entry_mut().from_hash(hash, |ThinEqNode(node)| {
+                node.kind() == kind
+                    && node
+                        .children()
+                        .zip(
+                            children
+                                .as_slice()
+                                .iter()
+                                .map(|x| unsafe { x.as_deref_unchecked().unpack() }),
+                        )
+                        .all(|pair| match pair {
+                            (NodeOrToken::Node(lhs), Enum2::A(rhs)) => ptr::eq(&*lhs, &*rhs),
+                            (NodeOrToken::Token(lhs), Enum2::B(rhs)) => lhs == rhs,
+                            _ => false,
+                        })
+            }) {
+                RawEntryMut::Occupied(entry) => entry.into_key_value(),
+                RawEntryMut::Vacant(entry) => {
+                    let node = Node::new(kind, children);
+                    entry.insert_with_hasher(hash, ThinEqNode(node), (), |x| do_hash(hasher, x))
+                }
+            };
+        node.clone()
     }
 
     /// Get a cached version of the input node.
@@ -136,10 +200,10 @@ impl Builder {
 
         let hash = {
             // spoof Token's hash impl
-            let mut hasher = hasher.build_hasher();
-            kind.hash(&mut hasher);
-            text.hash(&mut hasher);
-            hasher.finish()
+            let state = &mut hasher.build_hasher();
+            kind.hash(state);
+            text.hash(state);
+            state.finish()
         };
 
         let entry = self
