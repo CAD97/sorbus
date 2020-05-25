@@ -7,6 +7,7 @@
 //!
 //!   [rowan]: <lib.rs/rowan>
 
+#![feature(vec_drain_as_slice)]
 #![forbid(unconditional_recursion)]
 #![warn(missing_debug_implementations, missing_docs)]
 
@@ -45,4 +46,25 @@ fn test_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Arc<green::Node>>();
     assert_send_sync::<Arc<green::Token>>();
+}
+
+pub(crate) use as_slice_trait::AsSlice;
+mod as_slice_trait {
+    use std::vec;
+
+    pub trait AsSlice<T> {
+        fn as_slice(&self) -> &[T];
+    }
+
+    impl<T> AsSlice<T> for vec::IntoIter<T> {
+        fn as_slice(&self) -> &[T] {
+            self.as_slice()
+        }
+    }
+
+    impl<T> AsSlice<T> for vec::Drain<'_, T> {
+        fn as_slice(&self) -> &[T] {
+            self.as_slice()
+        }
+    }
 }

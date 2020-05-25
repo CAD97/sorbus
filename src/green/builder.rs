@@ -1,10 +1,11 @@
 use {
     crate::{
         green::{pack_node_or_token, unpack_node_or_token, Node, PackedNodeOrToken, Token},
-        Kind, NodeOrToken,
+        AsSlice, Kind, NodeOrToken,
     },
-    hashbrown::{hash_map::RawEntryMut, HashMap, HashSet},
+    hashbrown::{hash_map::RawEntryMut, HashMap},
     std::{
+        fmt,
         hash::{BuildHasher, Hash, Hasher},
         ptr,
         sync::Arc,
@@ -15,22 +16,24 @@ use {
 struct ThinEqNode(Arc<Node>);
 
 impl Eq for ThinEqNode {}
+
 impl PartialEq for ThinEqNode {
     fn eq(&self, other: &Self) -> bool {
         self.0.kind() == other.0.kind()
+            // We include the len hash to potentially skip the children, even though it's derived.
             && self.0.len() == other.0.len()
             && self.0.children().zip(other.0.children()).all(|pair| match pair {
-                (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &*rhs),
-                (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => lhs == rhs,
-                _ => false,
-            })
+            (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &*rhs),
+            (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => lhs == rhs,
+            _ => false,
+        })
     }
 }
 
 impl Hash for ThinEqNode {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.kind().hash(state);
-        self.0.len().hash(state);
+        // We can omit the len hash because it's derived from the children.
         for child in self.0.children() {
             match child {
                 NodeOrToken::Node(node) => ptr::hash(&*node, state),
@@ -46,10 +49,34 @@ impl Hash for ThinEqNode {
 /// For example, all nodes representing the `#[inline]` attribute can
 /// be deduplicated and refer to the same green node in memory,
 /// despite their distribution throughout the source code.
-#[derive(Debug, Default, Clone)]
+#[derive(/*Debug,*/ Default, Clone)]
 pub struct Builder {
-    nodes: HashSet<ThinEqNode>,
-    tokens: HashMap<Arc<Token>, ()>,
+    hasher: hashbrown::hash_map::DefaultHashBuilder,
+    nodes: HashMap<ThinEqNode, (), ()>,
+    tokens: HashMap<Arc<Token>, (), ()>,
+}
+
+impl fmt::Debug for Builder {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if f.alternate() {
+            f.debug_struct("Builder")
+                .field("nodes", &self.nodes)
+                .field("tokens", &self.tokens)
+                .finish()
+        } else {
+            // save a lot of space
+            f.debug_struct("Builder")
+                .field("nodes", &format_args!("{} cached", self.nodes.len()))
+                .field("tokens", &format_args!("{} cached", self.tokens.len()))
+                .finish()
+        }
+    }
+}
+
+fn do_hash(hasher: &impl BuildHasher, hashee: &impl Hash) -> u64 {
+    let mut hasher = hasher.build_hasher();
+    hashee.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl Builder {
@@ -65,17 +92,18 @@ impl Builder {
     /// if the lower-level nodes have also been cached.
     pub fn node<I>(&mut self, kind: Kind, children: I) -> Arc<Node>
     where
-        I: IntoIterator,
-        I::Item: Into<NodeOrToken<Arc<Node>, Arc<Token>>>,
-        I::IntoIter: ExactSizeIterator,
+        I: Iterator<Item = NodeOrToken<Arc<Node>, Arc<Token>>>
+            + ExactSizeIterator
+            + AsSlice<NodeOrToken<Arc<Node>, Arc<Token>>>,
     {
-        self.node_packed(kind, children.into_iter().map(Into::into).map(pack_node_or_token))
+        let node = Node::new(kind, children.map(pack_node_or_token));
+        self.cache_node(node)
     }
 
     /// Version of `Builder::node` taking a pre-packed child element iterator.
     pub(super) fn node_packed<I>(&mut self, kind: Kind, children: I) -> Arc<Node>
     where
-        I: Iterator<Item = PackedNodeOrToken> + ExactSizeIterator,
+        I: Iterator<Item = PackedNodeOrToken> + ExactSizeIterator + AsSlice<PackedNodeOrToken>,
     {
         let node = Node::new(kind, children);
         self.cache_node(node)
@@ -87,14 +115,28 @@ impl Builder {
     /// If it's already in the cache, return a clone of the cached version.
     pub(super) fn cache_node(&mut self, node: Arc<Node>) -> Arc<Node> {
         let node = ThinEqNode(node);
-        self.nodes.get_or_insert(node).0.clone()
+        let hasher = &self.hasher;
+
+        let (ThinEqNode(node), ()) = match self
+            .nodes
+            .raw_entry_mut()
+            .from_key_hashed_nocheck(do_hash(hasher, &node), &node)
+        {
+            RawEntryMut::Occupied(entry) => entry.into_key_value(),
+            RawEntryMut::Vacant(entry) => {
+                entry.insert_with_hasher(do_hash(hasher, &node), node, (), |x| do_hash(hasher, x))
+            }
+        };
+        node.clone()
     }
 
     /// Create a new token or clone a new Arc to an existing equivalent one.
     pub fn token(&mut self, kind: Kind, text: &str) -> Arc<Token> {
+        let hasher = &self.hasher;
+
         let hash = {
             // spoof Token's hash impl
-            let mut hasher = self.tokens.hasher().build_hasher();
+            let mut hasher = hasher.build_hasher();
             kind.hash(&mut hasher);
             text.hash(&mut hasher);
             hasher.finish()
@@ -105,13 +147,13 @@ impl Builder {
             .raw_entry_mut()
             .from_hash(hash, |token| token.kind() == kind && token.text() == text);
 
-        match entry {
-            RawEntryMut::Occupied(entry) => entry.key().clone(),
+        let (token, ()) = match entry {
+            RawEntryMut::Occupied(entry) => entry.into_key_value(),
             RawEntryMut::Vacant(entry) => {
-                let (token, ()) = entry.insert_hashed_nocheck(hash, Token::new(kind, text), ());
-                token.clone()
+                entry.insert_with_hasher(hash, Token::new(kind, text), (), |x| do_hash(hasher, x))
             }
-        }
+        };
+        token.clone()
     }
 }
 
@@ -158,9 +200,9 @@ impl TreeBuilder {
     /// Add a new node to the current branch.
     pub fn node<I>(&mut self, kind: Kind, children: I) -> &mut Self
     where
-        I: IntoIterator,
-        I::Item: Into<NodeOrToken<Arc<Node>, Arc<Token>>>,
-        I::IntoIter: ExactSizeIterator,
+        I: Iterator<Item = NodeOrToken<Arc<Node>, Arc<Token>>>
+            + ExactSizeIterator
+            + AsSlice<NodeOrToken<Arc<Node>, Arc<Token>>>,
     {
         let node = self.cache.node(kind, children);
         self.add(node)
