@@ -9,6 +9,7 @@ authors = [
 ]
 
 [dependencies]
+ahash = "0.3"
 erasable = "1.2" # public
 hashbrown = "0.7"
 ptr-union = "2.0"

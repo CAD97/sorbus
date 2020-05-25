@@ -3,8 +3,9 @@ use {
         green::{pack_node_or_token, unpack_node_or_token, Node, PackedNodeOrToken, Token},
         Kind, NodeOrToken,
     },
-    hashbrown::{hash_map::RawEntryMut, HashMap, HashSet},
+    hashbrown::{hash_map::RawEntryMut, HashMap},
     std::{
+        fmt,
         hash::{BuildHasher, Hash, Hasher},
         ptr,
         sync::Arc,
@@ -18,10 +19,10 @@ impl Eq for ThinEqNode {}
 impl PartialEq for ThinEqNode {
     fn eq(&self, other: &Self) -> bool {
         self.0.kind() == other.0.kind()
-            && self.0.len() == other.0.len()
+            // we can skip `len` as it is derived from `children`
             && self.0.children().zip(other.0.children()).all(|pair| match pair {
                 (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &*rhs),
-                (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => lhs == rhs,
+                (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => ptr::eq(&*lhs, &*rhs),
                 _ => false,
             })
     }
@@ -30,11 +31,11 @@ impl PartialEq for ThinEqNode {
 impl Hash for ThinEqNode {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.kind().hash(state);
-        self.0.len().hash(state);
+        // we can skip `len` as it is derived from `children`
         for child in self.0.children() {
             match child {
                 NodeOrToken::Node(node) => ptr::hash(&*node, state),
-                NodeOrToken::Token(token) => token.hash(state),
+                NodeOrToken::Token(token) => ptr::hash(&*token, state),
             }
         }
     }
@@ -46,10 +47,34 @@ impl Hash for ThinEqNode {
 /// For example, all nodes representing the `#[inline]` attribute can
 /// be deduplicated and refer to the same green node in memory,
 /// despite their distribution throughout the source code.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct Builder {
-    nodes: HashSet<ThinEqNode>,
-    tokens: HashMap<Arc<Token>, ()>,
+    hasher: ahash::RandomState, // dedupe the 2×u64 hasher state and enforce custom hashing
+    nodes: HashMap<ThinEqNode, (), ()>,
+    tokens: HashMap<Arc<Token>, (), ()>,
+}
+
+impl fmt::Debug for Builder {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // save space in nonexpanded view
+        if f.alternate() {
+            f.debug_struct("Builder")
+                .field("nodes", &self.nodes)
+                .field("tokens", &self.tokens)
+                .finish()
+        } else {
+            f.debug_struct("Builder")
+                .field("nodes", &format_args!("{} cached", self.nodes.len()))
+                .field("tokens", &format_args!("{} cached", self.tokens.len()))
+                .finish()
+        }
+    }
+}
+
+fn do_hash(hasher: &impl BuildHasher, hashee: &impl Hash) -> u64 {
+    let state = &mut hasher.build_hasher();
+    hashee.hash(state);
+    state.finish()
 }
 
 impl Builder {
@@ -86,32 +111,43 @@ impl Builder {
     /// If the node is new to this cache, store it and return a clone.
     /// If it's already in the cache, return a clone of the cached version.
     pub(super) fn cache_node(&mut self, node: Arc<Node>) -> Arc<Node> {
+        let hasher = &self.hasher;
         let node = ThinEqNode(node);
-        self.nodes.get_or_insert(node).0.clone()
+
+        let entry =
+            self.nodes.raw_entry_mut().from_key_hashed_nocheck(do_hash(hasher, &node), &node);
+        let (ThinEqNode(node), ()) = match entry {
+            RawEntryMut::Occupied(entry) => entry.into_key_value(),
+            RawEntryMut::Vacant(entry) => {
+                entry.insert_with_hasher(do_hash(hasher, &node), node, (), |x| do_hash(hasher, x))
+            }
+        };
+        Arc::clone(node)
     }
 
     /// Create a new token or clone a new Arc to an existing equivalent one.
     pub fn token(&mut self, kind: Kind, text: &str) -> Arc<Token> {
+        let hasher = &self.hasher;
+
         let hash = {
             // spoof Token's hash impl
-            let mut hasher = self.tokens.hasher().build_hasher();
-            kind.hash(&mut hasher);
-            text.hash(&mut hasher);
-            hasher.finish()
+            let state = &mut hasher.build_hasher();
+            kind.hash(state);
+            text.hash(state);
+            state.finish()
         };
 
         let entry = self
             .tokens
             .raw_entry_mut()
             .from_hash(hash, |token| token.kind() == kind && token.text() == text);
-
-        match entry {
-            RawEntryMut::Occupied(entry) => entry.key().clone(),
+        let (token, ()) = match entry {
+            RawEntryMut::Occupied(entry) => entry.into_key_value(),
             RawEntryMut::Vacant(entry) => {
-                let (token, ()) = entry.insert_hashed_nocheck(hash, Token::new(kind, text), ());
-                token.clone()
+                entry.insert_with_hasher(hash, Token::new(kind, text), (), |x| do_hash(hasher, x))
             }
-        }
+        };
+        Arc::clone(token)
     }
 }
 
