@@ -20,7 +20,6 @@ const ASSERT_TEXTSIZE_IS_U32: fn() = || {
 
 pub mod green;
 mod utils;
-mod layout_polyfill;
 
 #[doc(inline)]
 pub use crate::utils::{Kind, NodeOrToken};
