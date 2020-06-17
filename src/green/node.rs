@@ -1,3 +1,5 @@
+#[cfg(feature = "de")]
+use slice_dst::TryAllocSliceDst;
 use {
     crate::{
         green::{
@@ -8,7 +10,7 @@ use {
     },
     erasable::{Erasable, ErasedPtr},
     ptr_union::Enum2,
-    slice_dst::{AllocSliceDst, SliceDst, TryAllocSliceDst},
+    slice_dst::{AllocSliceDst, SliceDst},
     std::{alloc::Layout, hash, mem::ManuallyDrop, ptr, sync::Arc, u16},
 };
 
@@ -107,6 +109,7 @@ impl Drop for Node {
 
 #[allow(clippy::len_without_is_empty)]
 impl Node {
+    #[cfg(feature = "de")]
     pub(super) fn set_kind(&mut self, kind: Kind) {
         self.kind = kind;
     }
@@ -230,6 +233,7 @@ impl Node {
         }
     }
 
+    #[cfg(feature = "de")]
     #[allow(clippy::new_ret_no_self)]
     pub(super) fn try_new<A, I, E>(kind: Kind, mut children: I) -> Result<A, E>
     where
