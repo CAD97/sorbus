@@ -7,6 +7,7 @@ authors = [
     "Aleksy Kladov <aleksey.kladov@gmail.com>",
     "Christopher Durham (CAD97) <cad97@cad97.com>",
 ]
+license = "Apache-2.0 / MIT"
 
 [dependencies]
 ahash = "0.3"
