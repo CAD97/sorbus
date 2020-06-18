@@ -83,6 +83,13 @@ impl Builder {
         Self::default()
     }
 
+    /// The number of cached elements.
+    pub fn size(&self) -> usize {
+        self.nodes.len() + self.tokens.len()
+    }
+}
+
+impl Builder {
     /// Create a new node or clone a new Arc to an existing equivalent one.
     ///
     /// This checks children for identity equivalence, not structural,
@@ -148,6 +155,43 @@ impl Builder {
             }
         };
         Arc::clone(token)
+    }
+}
+
+impl Builder {
+    fn turn_node_gc(&mut self) -> bool {
+        // NB: `drain_filter` is `retain` but with an iterator of the removed elements.
+        // i.e.: elements where the predicate is FALSE are removed and iterated over.
+        self.nodes.drain_filter(|ThinEqNode(node), ()| Arc::strong_count(node) > 1).any(|_| true)
+    }
+
+    fn turn_token_gc(&mut self) -> bool {
+        self.tokens.drain_filter(|token, ()| Arc::strong_count(token) > 1).any(|_| true)
+    }
+
+    /// Collect cached nodes that are no longer live outside the cache.
+    ///
+    /// This is a single turn of the GC, and may not GC all potentially unused
+    /// nodes in the cache. To run this to a fixpoint, use [`Builder::gc`].
+    pub fn turn_gc(&mut self) -> bool {
+        let removed_nodes = self.turn_node_gc();
+        let removed_tokens = self.turn_token_gc();
+        removed_nodes || removed_tokens
+    }
+
+    /// Collect all cached nodes that are no longer live outside the cache.
+    ///
+    /// This is slightly more efficient than just running [`Builder::turn_gc`]
+    /// to a fixpoint, as it knows more about the cache structure and can avoid
+    /// re-GCing definitely clean sections.
+    pub fn gc(&mut self) {
+        // Nodes can keep other elements live, so GC them to a fixpoint
+        while self.turn_node_gc() {
+            continue;
+        }
+        // Tokens are guaranteed leaves, so only need a single GC turn
+        self.turn_token_gc();
+        debug_assert!(!self.turn_token_gc());
     }
 }
 
