@@ -137,7 +137,7 @@ jobs:
       - name: Run Tarpaulin
         uses: actions-rs/tarpaulin@v0.1
         with:
-          version: '0.12.3'
-          args: --all-features --ignore-tests --run-types Tests # Doctests tarpaulin#402
+          version: '0.13.3'
+          args: --all-features --ignore-tests --run-types Tests Doctests Examples
       - name: Upload coverage report
         uses: codecov/codecov-action@v1
