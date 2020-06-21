@@ -17,11 +17,13 @@ fn works_properly() {
     #[rustfmt::skip]
     let outer = builder
         .start_node(kind2)
-            .add(inner.clone())
+            .start_node(kind2)
+                .add(inner.clone())
+            .finish_node()
         .finish_node()
     .finish();
 
-    assert_eq!(builder.builder().size(), 3);
+    assert_eq!(builder.builder().size(), 4);
 
     drop(outer);
     builder.builder().gc();
