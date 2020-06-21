@@ -1,7 +1,7 @@
 use {
     crate::{
         green::{pack_node_or_token, Node, PackedNodeOrToken, Token},
-        Kind, NodeOrToken,
+        ArcBorrow, Kind, NodeOrToken,
     },
     hashbrown::{hash_map::RawEntryMut, HashMap},
     std::{
@@ -159,38 +159,40 @@ impl Builder {
 }
 
 impl Builder {
-    fn turn_node_gc(&mut self) -> bool {
+    fn collect_root_nodes(&mut self) -> Vec<Arc<Node>> {
         // NB: `drain_filter` is `retain` but with an iterator of the removed elements.
         // i.e.: elements where the predicate is FALSE are removed and iterated over.
-        self.nodes.drain_filter(|ThinEqNode(node), ()| Arc::strong_count(node) > 1).any(|_| true)
+        self.nodes
+            .drain_filter(|ThinEqNode(node), ()| Arc::strong_count(node) > 1)
+            .map(|(ThinEqNode(node), _)| node)
+            .collect()
     }
 
-    fn turn_token_gc(&mut self) -> bool {
-        self.tokens.drain_filter(|token, ()| Arc::strong_count(token) > 1).any(|_| true)
-    }
-
-    /// Collect cached nodes that are no longer live outside the cache.
-    ///
-    /// This is a single turn of the GC, and may not GC all potentially unused
-    /// nodes in the cache. To run this to a fixpoint, use [`Builder::gc`].
-    pub fn turn_gc(&mut self) -> bool {
-        let removed_nodes = self.turn_node_gc();
-        let removed_tokens = self.turn_token_gc();
-        removed_nodes || removed_tokens
+    fn collect_tokens(&mut self) {
+        self.tokens.retain(|token, ()| Arc::strong_count(token) > 1)
     }
 
     /// Collect all cached nodes that are no longer live outside the cache.
-    ///
-    /// This is slightly more efficient than just running [`Builder::turn_gc`]
-    /// to a fixpoint, as it knows more about the cache structure and can avoid
-    /// re-GCing definitely clean sections.
     pub fn gc(&mut self) {
-        // Nodes can keep other elements live, so GC them to a fixpoint
-        while self.turn_node_gc() {
-            continue;
+        let mut to_drop = self.collect_root_nodes();
+        let Builder { hasher, nodes, .. } = self;
+
+        while let Some(node) = to_drop.pop() {
+            for child in node.children() {
+                if let Some(node) = child.into_node() {
+                    to_drop.push(ArcBorrow::upgrade(node));
+                }
+            }
+            if Arc::strong_count(&node) <= 2 {
+                let node = ThinEqNode(node);
+                match nodes.raw_entry_mut().from_key_hashed_nocheck(do_hash(hasher, &node), &node) {
+                    RawEntryMut::Occupied(entry) => {
+                        entry.remove();
+                    }
+                    RawEntryMut::Vacant(_entry) => {}
+                }
+            }
         }
-        // Tokens are guaranteed leaves, so only need a single GC turn
-        self.turn_token_gc();
-        debug_assert!(!self.turn_token_gc());
+        self.collect_tokens();
     }
 }
