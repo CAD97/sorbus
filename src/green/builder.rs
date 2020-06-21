@@ -163,14 +163,8 @@ impl Builder {
 impl Builder {
     fn gc_nodes(&mut self) {
         // WARN: this is evil concurrent modification of the table while iterating it.
-        // IIUC, this is not actually allowed with the current hashbrown RawIter, and
-        // I need to use the internal-only RawIterRange. This is because RawIter tracks
-        // how many items are remaining to be iterated, and concurrent modification
-        // invalidates this tracking. RawIterRange does not do this tracking. However,
-        // I'm not sure that this kind of concurrent modification/iteration is even
-        // possible with Hashbrown due to the group reading of control bytes. Someone
-        // more familiar with Hashbrown needs to review this before considering landing.
-        // TODO FIXME XXX DO NOT MERGE
+        // I'm not sure that this kind of concurrent modification/iteration is allowed, so
+        // this should definitely should get reviewed by someone familiar with hashbrown.
         let Builder { hasher, nodes, .. } = self;
 
         let mut to_drop = vec![];
@@ -201,14 +195,21 @@ impl Builder {
             }
         }
 
+        #[allow(clippy::while_let_on_iterator)] // we're doing questionable things
         while let Some(bucket) = iter.next() {
+            let index = unsafe { nodes.bucket_index(&bucket) };
             cleanup(bucket, nodes, &mut to_drop);
 
             while let Some(node) = to_drop.pop() {
                 let hash = thin_node_hash(&node, hasher);
                 if let Some(bucket) = nodes.find(hash, |x| thin_node_eq(x, &node)) {
-                    drop(node);
-                    cleanup(bucket, nodes, &mut to_drop);
+                    // Only collect nodes "behind" the iterator head. Nodes "ahead"
+                    // of the iterator head will be collected from the iterator.
+                    // This allows us to not invalidate the iterator.
+                    if unsafe { nodes.bucket_index(&bucket) < index } {
+                        drop(node);
+                        cleanup(bucket, nodes, &mut to_drop);
+                    }
                 }
             }
         }
