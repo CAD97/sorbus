@@ -1,44 +1,44 @@
 use {
     crate::{
         green::{pack_node_or_token, Node, PackedNodeOrToken, Token},
-        Kind, NodeOrToken,
+        ArcBorrow, Kind, NodeOrToken,
     },
-    hashbrown::{hash_map::RawEntryMut, HashMap},
+    hashbrown::{
+        hash_map::{HashMap, RawEntryMut},
+        raw::{Bucket, RawTable},
+    },
+    rc_box::ArcBox,
+    scopeguard::{guard, ScopeGuard},
     std::{
+        convert::TryFrom,
         fmt,
         hash::{BuildHasher, Hash, Hasher},
-        ptr,
+        mem, ptr,
         sync::Arc,
     },
 };
 
-#[derive(Debug, Clone)]
-struct ThinEqNode(Arc<Node>);
-
-impl Eq for ThinEqNode {}
-impl PartialEq for ThinEqNode {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.kind() == other.0.kind()
-            // we can skip `len` as it is derived from `children`
-            && self.0.children().zip(other.0.children()).all(|pair| match pair {
-                (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &*rhs),
-                (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => ptr::eq(&*lhs, &*rhs),
-                _ => false,
-            })
-    }
+fn thin_node_eq(this: &Node, that: &Node) -> bool {
+    // we can skip `len` as it is derived from `children`
+    this.kind() == that.kind()
+        && this.children().zip(that.children()).all(|pair| match pair {
+            (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &*rhs),
+            (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => ptr::eq(&*lhs, &*rhs),
+            _ => false,
+        })
 }
 
-impl Hash for ThinEqNode {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.kind().hash(state);
-        // we can skip `len` as it is derived from `children`
-        for child in self.0.children() {
-            match child {
-                NodeOrToken::Node(node) => ptr::hash(&*node, state),
-                NodeOrToken::Token(token) => ptr::hash(&*token, state),
-            }
+fn thin_node_hash(this: &Node, hasher: &impl BuildHasher) -> u64 {
+    let state = &mut hasher.build_hasher();
+    // we can skip `len` as it is derived from `children`
+    this.kind().hash(state);
+    for child in this.children() {
+        match child {
+            NodeOrToken::Node(node) => ptr::hash(&*node, state),
+            NodeOrToken::Token(token) => ptr::hash(&*token, state),
         }
     }
+    state.finish()
 }
 
 /// Construction cache for green tree elements.
@@ -47,21 +47,28 @@ impl Hash for ThinEqNode {
 /// For example, all nodes representing the `#[inline]` attribute can
 /// be deduplicated and refer to the same green node in memory,
 /// despite their distribution throughout the source code.
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Builder {
     hasher: ahash::RandomState, // dedupe the 2×u64 hasher state and enforce custom hashing
-    nodes: HashMap<ThinEqNode, (), ()>,
+    nodes: RawTable<Arc<Node>>,
     tokens: HashMap<Arc<Token>, (), ()>,
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Builder { hasher: Default::default(), nodes: RawTable::new(), tokens: Default::default() }
+    }
 }
 
 impl fmt::Debug for Builder {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // save space in nonexpanded view
         if f.alternate() {
-            f.debug_struct("Builder")
-                .field("nodes", &self.nodes)
-                .field("tokens", &self.tokens)
-                .finish()
+            todo!()
+        // f.debug_struct("Builder")
+        //     .field("nodes", &self.nodes)
+        //     .field("tokens", &self.tokens)
+        //     .finish()
         } else {
             f.debug_struct("Builder")
                 .field("nodes", &format_args!("{} cached", self.nodes.len()))
@@ -118,18 +125,13 @@ impl Builder {
     /// If the node is new to this cache, store it and return a clone.
     /// If it's already in the cache, return a clone of the cached version.
     pub(super) fn cache_node(&mut self, node: Arc<Node>) -> Arc<Node> {
-        let hasher = &self.hasher;
-        let node = ThinEqNode(node);
+        let Builder { hasher, nodes, .. } = self;
 
-        let entry =
-            self.nodes.raw_entry_mut().from_key_hashed_nocheck(do_hash(hasher, &node), &node);
-        let (ThinEqNode(node), ()) = match entry {
-            RawEntryMut::Occupied(entry) => entry.into_key_value(),
-            RawEntryMut::Vacant(entry) => {
-                entry.insert_with_hasher(do_hash(hasher, &node), node, (), |x| do_hash(hasher, x))
-            }
-        };
-        Arc::clone(node)
+        let hash = thin_node_hash(&node, hasher);
+        let bucket = nodes
+            .find(hash, |x| thin_node_eq(x, &node))
+            .unwrap_or_else(|| nodes.insert(hash, node, |x| thin_node_hash(x, hasher)));
+        unsafe { Arc::clone(bucket.as_ref()) }
     }
 
     /// Create a new token or clone a new Arc to an existing equivalent one.
@@ -159,38 +161,66 @@ impl Builder {
 }
 
 impl Builder {
-    fn turn_node_gc(&mut self) -> bool {
-        // NB: `drain_filter` is `retain` but with an iterator of the removed elements.
-        // i.e.: elements where the predicate is FALSE are removed and iterated over.
-        self.nodes.drain_filter(|ThinEqNode(node), ()| Arc::strong_count(node) > 1).any(|_| true)
-    }
+    fn gc_nodes(&mut self) {
+        // WARN: this is evil concurrent modification of the table while iterating it.
+        // IIUC, this is not actually allowed with the current hashbrown RawIter, and
+        // I need to use the internal-only RawIterRange. This is because RawIter tracks
+        // how many items are remaining to be iterated, and concurrent modification
+        // invalidates this tracking. RawIterRange does not do this tracking. However,
+        // I'm not sure that this kind of concurrent modification/iteration is even
+        // possible with Hashbrown due to the group reading of control bytes. Someone
+        // more familiar with Hashbrown needs to review this before considering landing.
+        // TODO FIXME XXX DO NOT MERGE
+        let Builder { hasher, nodes, .. } = self;
 
-    fn turn_token_gc(&mut self) -> bool {
-        self.tokens.drain_filter(|token, ()| Arc::strong_count(token) > 1).any(|_| true)
-    }
+        let mut to_drop = vec![];
+        let mut iter = unsafe { nodes.iter() };
 
-    /// Collect cached nodes that are no longer live outside the cache.
-    ///
-    /// This is a single turn of the GC, and may not GC all potentially unused
-    /// nodes in the cache. To run this to a fixpoint, use [`Builder::gc`].
-    pub fn turn_gc(&mut self) -> bool {
-        let removed_nodes = self.turn_node_gc();
-        let removed_tokens = self.turn_token_gc();
-        removed_nodes || removed_tokens
-    }
-
-    /// Collect all cached nodes that are no longer live outside the cache.
-    ///
-    /// This is slightly more efficient than just running [`Builder::turn_gc`]
-    /// to a fixpoint, as it knows more about the cache structure and can avoid
-    /// re-GCing definitely clean sections.
-    pub fn gc(&mut self) {
-        // Nodes can keep other elements live, so GC them to a fixpoint
-        while self.turn_node_gc() {
-            continue;
+        fn cleanup(
+            bucket: Bucket<Arc<Node>>,
+            nodes: &mut RawTable<Arc<Node>>,
+            to_drop: &mut Vec<Arc<Node>>,
+        ) {
+            unsafe {
+                let guard = guard((), |()| nodes.erase_no_drop(&bucket));
+                match ArcBox::<Node>::try_from(bucket.read()) {
+                    // cache is final owner, drop node and potentially drop its children
+                    Ok(node) => {
+                        for child in node.children() {
+                            if let Some(node) = child.into_node() {
+                                to_drop.push(ArcBorrow::upgrade(node));
+                            }
+                        }
+                    }
+                    // node is still live, keep it in the cache
+                    Err(node) => {
+                        mem::forget(node);
+                        ScopeGuard::into_inner(guard);
+                    }
+                }
+            }
         }
-        // Tokens are guaranteed leaves, so only need a single GC turn
-        self.turn_token_gc();
-        debug_assert!(!self.turn_token_gc());
+
+        while let Some(bucket) = iter.next() {
+            cleanup(bucket, nodes, &mut to_drop);
+
+            while let Some(node) = to_drop.pop() {
+                let hash = thin_node_hash(&node, hasher);
+                if let Some(bucket) = nodes.find(hash, |x| thin_node_eq(x, &node)) {
+                    drop(node);
+                    cleanup(bucket, nodes, &mut to_drop);
+                }
+            }
+        }
+    }
+
+    fn gc_tokens(&mut self) {
+        self.tokens.retain(|token, ()| Arc::strong_count(token) > 1)
+    }
+
+    /// Collect all cached elements that are no longer live outside the cache.
+    pub fn gc(&mut self) {
+        self.gc_nodes();
+        self.gc_tokens();
     }
 }

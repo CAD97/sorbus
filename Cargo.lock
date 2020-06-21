@@ -685,6 +685,7 @@ dependencies = [
  "ptr-union",
  "rc-borrow",
  "rc-box",
+ "scopeguard",
  "serde",
  "serde_json",
  "serde_test",
