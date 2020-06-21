@@ -31,3 +31,23 @@ fn works_properly() {
     builder.builder().gc();
     assert_eq!(builder.builder().size(), 0);
 }
+
+#[test]
+fn degenerate() {
+    let kind = Kind(0);
+    let mut builder = green::TreeBuilder::new();
+
+    for _ in 0..999 {
+        builder.start_node(kind);
+    }
+    builder.token(kind, "wow");
+    for _ in 0..999 {
+        builder.finish_node();
+    }
+
+    let _ = builder.finish();
+
+    assert_eq!(builder.builder().size(), 1000);
+    builder.builder().gc();
+    assert_eq!(builder.builder().size(), 0);
+}
