@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["NodeOrToken","Enum wrapping either a node or a token."]],"mod":[["green","The green tree is an immutable, persistent, atomically reference counted tree."]],"struct":[["Kind","Raw kind tag for each element in the tree."]]});
