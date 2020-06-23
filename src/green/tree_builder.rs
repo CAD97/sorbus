@@ -49,11 +49,12 @@ impl TreeBuilder {
     }
 
     /// Add a new node to the current branch.
-    pub fn node<I>(&mut self, kind: Kind, children: I) -> &mut Self
+    pub fn node<I, R>(&mut self, kind: Kind, children: I) -> &mut Self
     where
         I: IntoIterator,
         I::Item: Into<NodeOrToken<Arc<Node>, Arc<Token>>>,
-        I::IntoIter: ExactSizeIterator,
+        I::IntoIter: ExactSizeIterator + AsRef<[R]>,
+        for<'a> &'a R: Into<NodeOrToken<&'a Node, &'a Token>>,
     {
         let node = self.cache.node(kind, children);
         self.add(node)
