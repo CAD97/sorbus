@@ -9,6 +9,7 @@
 
 #![forbid(unconditional_recursion)]
 #![warn(missing_debug_implementations, missing_docs)]
+#![allow(clippy::unnested_or_patterns)] // rust-lang/rust-clippy#5702
 
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
 compile_error!("sorbus only works when sizeof(*const ()) is u32 or u64");
@@ -28,15 +29,6 @@ pub use {
     rc_borrow::ArcBorrow,
     text_size::{TextRange, TextSize},
 };
-
-/// Reexports of commonly used types.
-pub mod prelude {
-    #[doc(no_inline)]
-    pub use crate::{
-        green::{Node as GreenNode, Token as GreenToken},
-        Kind, NodeOrToken,
-    };
-}
 
 #[test]
 fn test_send_sync() {

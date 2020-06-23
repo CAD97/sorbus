@@ -3,6 +3,7 @@ use {
         green::{pack_node_or_token, Node, PackedNodeOrToken, Token},
         ArcBorrow, Kind, NodeOrToken,
     },
+    erasable::{ErasablePtr, ErasedPtr},
     hashbrown::{hash_map::RawEntryMut, HashMap},
     std::{
         fmt,
@@ -12,36 +13,36 @@ use {
     },
 };
 
-#[derive(Debug, Clone)]
-struct ThinEqNode(Arc<Node>);
-
-impl Eq for ThinEqNode {}
-impl PartialEq for ThinEqNode {
-    fn eq(&self, other: &Self) -> bool {
-        // We can skip `len` (the textual length) as it is derived from `children`,
-        // but we do need to make sure that the children array length is equal;
-        // Iterator::zip just truncates the longer iterator.
-        self.0.kind() == other.0.kind()
-            && self.0.children().len() == other.0.children().len()
-            && self.0.children().zip(other.0.children()).all(|pair| match pair {
-                (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &*rhs),
-                (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => ptr::eq(&*lhs, &*rhs),
-                _ => false,
-            })
-    }
+fn erased_children<'a, I: 'a>(
+    children: I,
+) -> impl 'a + Iterator<Item = ErasedPtr> + ExactSizeIterator
+where
+    I: IntoIterator,
+    I::IntoIter: ExactSizeIterator,
+    I::Item: Into<NodeOrToken<&'a Node, &'a Token>>,
+{
+    children.into_iter().map(|el| el.into().map(ErasablePtr::erase, ErasablePtr::erase).flatten())
 }
 
-impl Hash for ThinEqNode {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.kind().hash(state);
-        // we can skip `len` as it is derived from `children`
-        for child in self.0.children() {
-            match child {
-                NodeOrToken::Node(node) => ptr::hash(&*node, state),
-                NodeOrToken::Token(token) => ptr::hash(&*token, state),
-            }
-        }
+fn thin_node_eq(
+    node: &Node,
+    kind: Kind,
+    children: impl Iterator<Item = ErasedPtr> + ExactSizeIterator,
+) -> bool {
+    node.kind() == kind && erased_children(node.children()).eq(children)
+}
+
+fn thin_node_hash(
+    hasher: &impl BuildHasher,
+    kind: Kind,
+    children: impl Iterator<Item = ErasedPtr>,
+) -> u64 {
+    let state = &mut hasher.build_hasher();
+    kind.hash(state);
+    for child in children {
+        ptr::hash(child.as_ptr(), state);
     }
+    state.finish()
 }
 
 /// Construction cache for green tree elements.
@@ -53,7 +54,7 @@ impl Hash for ThinEqNode {
 #[derive(Default, Clone)]
 pub struct Builder {
     hasher: ahash::RandomState, // dedupe the 2×u64 hasher state and enforce custom hashing
-    nodes: HashMap<ThinEqNode, (), ()>,
+    nodes: HashMap<Arc<Node>, (), ()>,
     tokens: HashMap<Arc<Token>, (), ()>,
 }
 
@@ -74,7 +75,7 @@ impl fmt::Debug for Builder {
     }
 }
 
-fn do_hash(hasher: &impl BuildHasher, hashee: &impl Hash) -> u64 {
+fn do_hash(hasher: &impl BuildHasher, hashee: &(impl ?Sized + Hash)) -> u64 {
     let state = &mut hasher.build_hasher();
     hashee.hash(state);
     state.finish()
@@ -98,39 +99,90 @@ impl Builder {
     /// This checks children for identity equivalence, not structural,
     /// so it is `O(children.len())` and only caches higher-level nodes
     /// if the lower-level nodes have also been cached.
-    pub fn node<I>(&mut self, kind: Kind, children: I) -> Arc<Node>
+    pub fn node<I, R>(&mut self, kind: Kind, children: I) -> Arc<Node>
     where
         I: IntoIterator,
         I::Item: Into<NodeOrToken<Arc<Node>, Arc<Token>>>,
-        I::IntoIter: ExactSizeIterator,
+        I::IntoIter: ExactSizeIterator + AsRef<[R]>,
+        for<'a> &'a R: Into<NodeOrToken<&'a Node, &'a Token>>,
     {
-        self.node_packed(kind, children.into_iter().map(Into::into).map(pack_node_or_token))
+        let hasher = &self.hasher;
+        let children = children.into_iter();
+
+        let hash = thin_node_hash(hasher, kind, erased_children(children.as_ref()));
+
+        let entry = self
+            .nodes
+            .raw_entry_mut()
+            .from_hash(hash, |node| thin_node_eq(node, kind, erased_children(children.as_ref())));
+
+        let (node, ()) = match entry {
+            RawEntryMut::Occupied(entry) => entry.into_key_value(),
+            RawEntryMut::Vacant(entry) => {
+                let node = Node::new(kind, children.map(Into::into).map(pack_node_or_token));
+                entry.insert_with_hasher(hash, node, (), |node| {
+                    thin_node_hash(hasher, node.kind(), erased_children(node.children()))
+                })
+            }
+        };
+
+        Arc::clone(node)
     }
 
     /// Version of `Builder::node` taking a pre-packed child element iterator.
     pub(super) fn node_packed<I>(&mut self, kind: Kind, children: I) -> Arc<Node>
     where
-        I: Iterator<Item = PackedNodeOrToken> + ExactSizeIterator,
+        I: Iterator<Item = PackedNodeOrToken> + ExactSizeIterator + AsRef<[PackedNodeOrToken]>,
     {
-        let node = Node::new(kind, children);
-        self.cache_node(node)
+        let hasher = &self.hasher;
+
+        let hash = thin_node_hash(
+            hasher,
+            kind,
+            children.as_ref().iter().map(PackedNodeOrToken::as_untagged_ptr),
+        );
+
+        let entry = self.nodes.raw_entry_mut().from_hash(hash, |node| {
+            thin_node_eq(
+                node,
+                kind,
+                children.as_ref().iter().map(PackedNodeOrToken::as_untagged_ptr),
+            )
+        });
+
+        let (node, ()) = match entry {
+            RawEntryMut::Occupied(entry) => entry.into_key_value(),
+            RawEntryMut::Vacant(entry) => {
+                let node = Node::new(kind, children);
+                entry.insert_with_hasher(hash, node, (), |node| {
+                    thin_node_hash(hasher, node.kind(), erased_children(node.children()))
+                })
+            }
+        };
+
+        Arc::clone(node)
     }
 
     /// Get a cached version of the input node.
     ///
     /// If the node is new to this cache, store it and return a clone.
     /// If it's already in the cache, return a clone of the cached version.
+    #[cfg(feature = "de")]
     pub(super) fn cache_node(&mut self, node: Arc<Node>) -> Arc<Node> {
         let hasher = &self.hasher;
-        let node = ThinEqNode(node);
 
-        let entry =
-            self.nodes.raw_entry_mut().from_key_hashed_nocheck(do_hash(hasher, &node), &node);
-        let (ThinEqNode(node), ()) = match entry {
+        let hash = thin_node_hash(hasher, node.kind(), erased_children(node.children()));
+
+        let entry = self
+            .nodes
+            .raw_entry_mut()
+            .from_hash(hash, |x| thin_node_eq(x, node.kind(), erased_children(node.children())));
+
+        let (node, ()) = match entry {
             RawEntryMut::Occupied(entry) => entry.into_key_value(),
-            RawEntryMut::Vacant(entry) => {
-                entry.insert_with_hasher(do_hash(hasher, &node), node, (), |x| do_hash(hasher, x))
-            }
+            RawEntryMut::Vacant(entry) => entry.insert_with_hasher(hash, node, (), |node| {
+                thin_node_hash(hasher, node.kind(), erased_children(node.children()))
+            }),
         };
         Arc::clone(node)
     }
@@ -166,8 +218,8 @@ impl Builder {
         // NB: `drain_filter` is `retain` but with an iterator of the removed elements.
         // i.e.: elements where the predicate is FALSE are removed and iterated over.
         self.nodes
-            .drain_filter(|ThinEqNode(node), ()| Arc::strong_count(node) > 1)
-            .map(|(ThinEqNode(node), _)| node)
+            .drain_filter(|node, ()| Arc::strong_count(node) > 1)
+            .map(|(node, _)| node)
             .collect()
     }
 
@@ -187,12 +239,12 @@ impl Builder {
                 }
             }
             if Arc::strong_count(&node) <= 2 {
-                let node = ThinEqNode(node);
-                match nodes.raw_entry_mut().from_key_hashed_nocheck(do_hash(hasher, &node), &node) {
-                    RawEntryMut::Occupied(entry) => {
-                        entry.remove();
-                    }
-                    RawEntryMut::Vacant(_entry) => {}
+                let hash = thin_node_hash(hasher, node.kind(), erased_children(node.children()));
+                let entry = nodes.raw_entry_mut().from_hash(hash, |x| {
+                    thin_node_eq(x, node.kind(), erased_children(node.children()))
+                });
+                if let RawEntryMut::Occupied(entry) = entry {
+                    entry.remove();
                 }
             }
         }

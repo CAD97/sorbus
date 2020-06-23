@@ -1,5 +1,5 @@
 use {
-    crate::prelude::{GreenNode, GreenToken},
+    crate::{green, ArcBorrow},
     std::{
         fmt::{self, Debug},
         ops::Deref,
@@ -92,10 +92,10 @@ impl<Node, Token> NodeOrToken<Node, Token> {
 
     pub fn kind(&self) -> Kind
     where
-        Node: Deref<Target = GreenNode>,
-        Token: Deref<Target = GreenToken>,
+        Node: Deref<Target = green::Node>,
+        Token: Deref<Target = green::Token>,
     {
-        self.as_deref().map(GreenNode::kind, GreenToken::kind).flatten()
+        self.as_deref().map(green::Node::kind, green::Token::kind).flatten()
     }
 }
 
@@ -108,14 +108,66 @@ impl<T> NodeOrToken<T, T> {
     }
 }
 
-impl From<Arc<GreenNode>> for NodeOrToken<Arc<GreenNode>, Arc<GreenToken>> {
-    fn from(this: Arc<GreenNode>) -> Self {
+impl From<Arc<green::Node>> for NodeOrToken<Arc<green::Node>, Arc<green::Token>> {
+    fn from(this: Arc<green::Node>) -> Self {
         NodeOrToken::Node(this)
     }
 }
 
-impl From<Arc<GreenToken>> for NodeOrToken<Arc<GreenNode>, Arc<GreenToken>> {
-    fn from(this: Arc<GreenToken>) -> Self {
+impl From<Arc<green::Token>> for NodeOrToken<Arc<green::Node>, Arc<green::Token>> {
+    fn from(this: Arc<green::Token>) -> Self {
         NodeOrToken::Token(this)
+    }
+}
+
+impl<'a> From<&'a green::Node> for NodeOrToken<&'a green::Node, &'a green::Token> {
+    fn from(this: &'a green::Node) -> Self {
+        NodeOrToken::Node(this)
+    }
+}
+
+impl<'a> From<&'a green::Token> for NodeOrToken<&'a green::Node, &'a green::Token> {
+    fn from(this: &'a green::Token) -> Self {
+        NodeOrToken::Token(this)
+    }
+}
+
+impl<'a> From<&'a NodeOrToken<Arc<green::Node>, Arc<green::Token>>>
+    for NodeOrToken<&'a green::Node, &'a green::Token>
+{
+    fn from(this: &'a NodeOrToken<Arc<green::Node>, Arc<green::Token>>) -> Self {
+        this.as_deref()
+    }
+}
+
+impl<'a> From<&'a Arc<green::Node>> for NodeOrToken<&'a green::Node, &'a green::Token> {
+    fn from(this: &'a Arc<green::Node>) -> Self {
+        NodeOrToken::Node(&*this)
+    }
+}
+
+impl<'a> From<&'a Arc<green::Token>> for NodeOrToken<&'a green::Node, &'a green::Token> {
+    fn from(this: &'a Arc<green::Token>) -> Self {
+        NodeOrToken::Token(&*this)
+    }
+}
+
+impl<'a> From<ArcBorrow<'a, green::Node>> for NodeOrToken<&'a green::Node, &'a green::Token> {
+    fn from(this: ArcBorrow<'a, green::Node>) -> Self {
+        NodeOrToken::Node(ArcBorrow::downgrade(this))
+    }
+}
+
+impl<'a> From<ArcBorrow<'a, green::Token>> for NodeOrToken<&'a green::Node, &'a green::Token> {
+    fn from(this: ArcBorrow<'a, green::Token>) -> Self {
+        NodeOrToken::Token(ArcBorrow::downgrade(this))
+    }
+}
+
+impl<'a> From<NodeOrToken<ArcBorrow<'a, green::Node>, ArcBorrow<'a, green::Token>>>
+    for NodeOrToken<&'a green::Node, &'a green::Token>
+{
+    fn from(this: NodeOrToken<ArcBorrow<'a, green::Node>, ArcBorrow<'a, green::Token>>) -> Self {
+        this.map(ArcBorrow::downgrade, ArcBorrow::downgrade)
     }
 }
