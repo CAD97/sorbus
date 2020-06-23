@@ -233,12 +233,15 @@ impl Builder {
         let Builder { hasher, nodes, .. } = self;
 
         while let Some(node) = to_drop.pop() {
-            for child in node.children() {
-                if let Some(node) = child.into_node() {
-                    to_drop.push(ArcBorrow::upgrade(node));
-                }
-            }
             if Arc::strong_count(&node) <= 2 {
+                // queue children for (potential) removal from the cache
+                for child in node.children() {
+                    if let Some(node) = child.into_node() {
+                        to_drop.push(ArcBorrow::upgrade(node));
+                    }
+                }
+
+                // remove this node from the cache
                 let hash = thin_node_hash(hasher, node.kind(), erased_children(node.children()));
                 let entry = nodes.raw_entry_mut().from_hash(hash, |x| {
                     thin_node_eq(x, node.kind(), erased_children(node.children()))
