@@ -18,8 +18,11 @@ struct ThinEqNode(Arc<Node>);
 impl Eq for ThinEqNode {}
 impl PartialEq for ThinEqNode {
     fn eq(&self, other: &Self) -> bool {
+        // We can skip `len` (the textual length) as it is derived from `children`,
+        // but we do need to make sure that the children array length is equal;
+        // Iterator::zip just truncates the longer iterator.
         self.0.kind() == other.0.kind()
-            // we can skip `len` as it is derived from `children`
+            && self.0.children().len() == other.0.children().len()
             && self.0.children().zip(other.0.children()).all(|pair| match pair {
                 (NodeOrToken::Node(lhs), NodeOrToken::Node(rhs)) => ptr::eq(&*lhs, &*rhs),
                 (NodeOrToken::Token(lhs), NodeOrToken::Token(rhs)) => ptr::eq(&*lhs, &*rhs),
