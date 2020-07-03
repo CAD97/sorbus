@@ -28,7 +28,7 @@ optional = true
 default-features = false
 
 [features]
-ser = ["serde"]
+ser = ["serde", "text-size/serde"]
 de = ["serde", "serde/derive"]
 
 [dev-dependencies]
