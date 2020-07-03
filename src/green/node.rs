@@ -187,7 +187,6 @@ impl ChildrenWriter {
     }
 }
 
-#[allow(clippy::len_without_is_empty)]
 impl Node {
     // SAFETY: must accurately calculate the layout for length `len`
     fn layout(len: usize) -> (Layout, [usize; 4]) {

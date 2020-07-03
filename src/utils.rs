@@ -100,6 +100,7 @@ impl<Node, Token> NodeOrToken<Node, Token> {
 }
 
 #[allow(missing_docs)]
+#[allow(clippy::len_without_is_empty)]
 impl<Node, Token> NodeOrToken<Node, Token>
 where
     Node: Deref<Target = green::Node>,
