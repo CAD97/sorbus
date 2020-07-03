@@ -1,5 +1,5 @@
 use {
-    crate::{green, ArcBorrow},
+    crate::{green, ArcBorrow, TextSize},
     std::{
         fmt::{self, Debug},
         ops::Deref,
@@ -96,6 +96,18 @@ impl<Node, Token> NodeOrToken<Node, Token> {
         Token: Deref<Target = green::Token>,
     {
         self.as_deref().map(green::Node::kind, green::Token::kind).flatten()
+    }
+}
+
+#[allow(missing_docs)]
+#[allow(clippy::len_without_is_empty)]
+impl<Node, Token> NodeOrToken<Node, Token>
+where
+    Node: Deref<Target = green::Node>,
+    Token: Deref<Target = green::Token>,
+{
+    pub fn len(&self) -> TextSize {
+        self.as_deref().map(green::Node::len, green::Token::len).flatten()
     }
 }
 
