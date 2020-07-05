@@ -44,7 +44,7 @@ struct Token {
 }
 ```
 
-The "red" tree is a transient view of the green tree that remembers parent offsets and absolute textual position within the tree.
+The "red" tree is a transient view of the green tree that remembers parent pointers and absolute textual position within the tree.
 It is also at this level that language semantics are typically layered on top of the uniformly typed green tree. 
 Rowan provides the red tree built on top of sorbus's green tree.
 
@@ -95,8 +95,8 @@ Note that `Thin` can be used for (most) any pointer type, including `Thin<Arc<_>
 Pointers that may be to a node or a token are packed into a single word using alignment tagging.
 However, the child stored in each node's children array is not just the tagged pointer — instead,
 it also includes the cumulative offset of that child from the parent node. This array is then
-packed tightly by alternating the alignment of each child — one is `(u32, usize)` and the next
-is `(usize, u32)` — such that everything stays nicely aligned and without padding.
+packed tightly by alternating the alignment of each child — one is `(usize, u32)` and the next
+is `(u32, usize)` — such that everything stays nicely aligned and without padding.
 
 This extra somewhat redundant storage of node offsets allows asymptotically faster tree traversal —
 each node's children can be binary searched, allowing top-down finding of the node at some offset in
@@ -153,8 +153,8 @@ parse a source file but only the "root level," leaving items unparsed until a qu
 > **Author Note:**  
 > As of current, I'm yet unsure whether this needs specific support at the green (sorbus) level, or
 > just the red (rowan) level. Either way, this is adding back in a form of mutability into the
-> immutable tree, and the red tree pointers have very _interesting_ semantics (that I should write
-> up a design document for once I've given the red tree the same rework and polish that I've given
+> immutable tree, and the red tree pointers have very _interesting_ ownership semantics (that I should
+> write up a design document for once I've given the red tree the same rework and polish that I've given
 > the green tree in sorbus), so it needs to be done carefully. I suspect the best design will end up
 > being to store the root as [`ArcSwap`], using the already existing "replacement" API, and swapping
 > the new node back in. This doesn't require any support at the green level. Using `ArcSwap`
