@@ -309,7 +309,7 @@ impl<'de, Seq: SeqAccess<'de>> Iterator for SeqAccessExactSizeIterator<'_, 'de, 
         self.1.next_element_seed(ElementSeed(self.0)).transpose()
     }
 
-    #[cfg_attr(tarpaulin, skip)] // `len` is used instead, and this method is obviously correct
+    #[cfg(not(tarpaulin_ignore))] // `len` is used instead, and this method is obviously correct
     fn size_hint(&self) -> (usize, Option<usize>) {
         let len = self.len();
         (len, Some(len))
