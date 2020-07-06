@@ -5,4 +5,5 @@ status = [
     "Rustfmt",
     "Tests",
     "Miri",
+    "Coverage (tarpaulin)",
 ]
