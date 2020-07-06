@@ -104,12 +104,12 @@ jobs:
         with:
           command: miri
           args: setup
-      - name: Test 64 bit target
+      - name: Run tests (x64)
         uses: actions-rs/cargo@v1
         with:
           command: miri
           args: test --all-features --target x86_64-unknown-linux-gnu
-      - name: Test 32 bit target
+      - name: Run tests (x32)
         uses: actions-rs/cargo@v1
         with:
           command: miri
@@ -129,15 +129,22 @@ jobs:
           profile: minimal
           toolchain: nightly
           override: true
+      - name: Install 32 bit target
+        run: rustup target add i686-unknown-linux-gnu
       - name: Cache
         uses: actions/cache@v1
         with:
           path: target
           key: rustc-${{ steps.toolchain.outputs.rustc_hash }}-tarpaulin-${{ hashFiles('**/Cargo.lock') }}
-      - name: Run Tarpaulin
+      - name: Run Tarpaulin (x64)
         uses: actions-rs/tarpaulin@v0.1
         with:
           version: '0.14.1'
           args: --all-features --ignore-tests --run-types Tests Doctests Examples
+      - name: Run Tarpaulin (x32)
+        uses: actions-rs/tarpaulin@v0.1
+        with:
+          version: '0.14.1'
+          args: --all-features --ignore-tests --run-types Tests Doctests Examples --target i686-unknown-linux-gnu --verbose -- --verbose
       - name: Upload coverage report
         uses: codecov/codecov-action@v1
