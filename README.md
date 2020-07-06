@@ -65,7 +65,7 @@ The green tree is immutable and persistent, so nodes can be deduplicated.
 This is achieved in sorbus by proxying all creation of green tree elements through
 [a builder cache][green::Builder], at which point they are deduplicated.
 
-To reduce the number of allocations required for a green tree and increase the locallity,
+To reduce the number of allocations required for a green tree and increase the locality,
 the green nodes and tokens are [DSTs] laid out linearly in memory, roughly as the following:
 
 ```text
@@ -141,7 +141,7 @@ explore more interesting [cache strategies] alongside the current "cache everyth
 > Least Frequently Used strategy (even with aging), as the node's textual length is a very
 > decent predictor of duplication chance. But also because of that, I think a strategy of just
 > not caching nodes with a textual length above some threshold (1024 bytes?) to do just as well.
-> Plus, not have to store all the addtional state for the dynamic cache eviction. We just have
+> Plus, not having to store all the addtional state for the dynamic cache eviction. We just have
 > to be careful that this doesn't hurt incrementality, as higher nodes _do_ get duplicated when
 > a single file is reparsed with only minor edits.
 
