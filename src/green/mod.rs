@@ -10,10 +10,7 @@ mod tree_builder;
 #[cfg(feature = "serde")]
 mod serde;
 
-pub(self) use self::element::{
-    pack_node_or_token, unpack_node_or_token, Element, FullAlignedElement, HalfAlignedElement,
-    PackedNodeOrToken,
-};
+pub(self) use self::element::{borrow_element, pack_element, unpack_element, Element};
 #[doc(inline)]
 pub use self::{
     builder::Builder,
