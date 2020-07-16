@@ -1,8 +1,6 @@
 use {
     crate::{
-        green::{
-            pack_node_or_token, unpack_node_or_token, Builder, Node, PackedNodeOrToken, Token,
-        },
+        green::{pack_element, unpack_element, Builder, Element, Node, Token},
         Kind, NodeOrToken,
     },
     std::{hash::Hash, sync::Arc},
@@ -17,7 +15,7 @@ pub struct Checkpoint(usize);
 pub struct TreeBuilder {
     cache: Builder,
     stack: Vec<(Kind, usize)>,
-    children: Vec<PackedNodeOrToken>,
+    children: Vec<Element>,
 }
 
 impl TreeBuilder {
@@ -38,7 +36,7 @@ impl TreeBuilder {
 
     /// Add an element to the current branch.
     pub fn add(&mut self, element: impl Into<NodeOrToken<Arc<Node>, Arc<Token>>>) -> &mut Self {
-        self.children.push(pack_node_or_token(element.into()));
+        self.children.push(pack_element(element.into()));
         self
     }
 
@@ -201,7 +199,7 @@ impl TreeBuilder {
     pub fn finish(&mut self) -> Arc<Node> {
         assert!(self.stack.is_empty());
         assert_eq!(self.children.len(), 1);
-        unpack_node_or_token(self.children.pop().unwrap()).into_node().unwrap()
+        unpack_element(self.children.pop().unwrap()).into_node().unwrap()
     }
 
     /// Destroy this tree builder and recycle its build cache.
