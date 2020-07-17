@@ -1,7 +1,7 @@
 use {
     crate::{
         green::{pack_element, Element, Node, Token},
-        ArcBorrow, Kind, NodeOrToken,
+        ArcBorrow, Kind, NodeOrToken, TextSize,
     },
     erasable::{ErasablePtr, ErasedPtr},
     hashbrown::{hash_map::RawEntryMut, HashMap},
@@ -188,18 +188,49 @@ impl Builder {
             // spoof Token's hash impl
             let state = &mut hasher.build_hasher();
             kind.hash(state);
-            text.hash(state);
+            text.as_bytes().hash(state);
             state.finish()
         };
 
         let entry = self
             .tokens
             .raw_entry_mut()
-            .from_hash(hash, |token| token.kind() == kind && token.text() == text);
+            .from_hash(hash, |token| token.kind() == kind && token.raw_text() == text.as_bytes());
         let (token, ()) = match entry {
             RawEntryMut::Occupied(entry) => entry.into_key_value(),
             RawEntryMut::Vacant(entry) => {
                 entry.insert_with_hasher(hash, Token::new(kind, text), (), |x| do_hash(hasher, x))
+            }
+        };
+        Arc::clone(token)
+    }
+
+    /// Create a new thunk or clone a new Arc to an existing equivalent one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `len` is 0. Use `Token::new(kind, "")` instead.
+    pub fn thunk(&mut self, kind: Kind, len: TextSize) -> Arc<Token> {
+        assert!(len > 0.into());
+        let hasher = &self.hasher;
+
+        let hash = {
+            // spoof Token's hash impl
+            let state = &mut hasher.build_hasher();
+            kind.hash(state);
+            [0xFFu8].hash(state);
+            state.finish()
+        };
+
+        let entry = self.tokens.raw_entry_mut().from_hash(hash, |token| {
+            token.kind() == kind && token.len() == len && token.is_thunk()
+        });
+        let (token, ()) = match entry {
+            RawEntryMut::Occupied(entry) => entry.into_key_value(),
+            RawEntryMut::Vacant(entry) => {
+                entry.insert_with_hasher(hash, Token::new_thunk(kind, len), (), |x| {
+                    do_hash(hasher, x)
+                })
             }
         };
         Arc::clone(token)

@@ -81,7 +81,7 @@ fn to_sexpr(node: &green::Node) -> String {
         f: &'a mut dyn fmt::Write,
     ) -> fmt::Result {
         match el {
-            NodeOrToken::Token(token) => write!(f, "{}", token.text())?,
+            NodeOrToken::Token(token) => write!(f, "{}", token.text().unwrap())?,
             NodeOrToken::Node(node) => {
                 let children_of_interest: Vec<_> =
                     node.children().filter(|el| el.kind() != WS).collect();

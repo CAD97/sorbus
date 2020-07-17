@@ -2,20 +2,39 @@ use {
     crate::{Kind, TextSize},
     erasable::{Erasable, ErasedPtr},
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{alloc::Layout, convert::TryFrom, hash, ptr},
+    std::{alloc::Layout, convert::TryFrom, fmt, hash, ptr, str},
 };
 
 /// A leaf token in the immutable green tree.
 ///
 /// Tokens are crated using [`Builder::token`](crate::green::Builder::token).
 #[repr(C, align(2))] // NB: align >= 2
-#[derive(Debug, Eq)]
+#[derive(Eq)]
 pub struct Token {
     // NB: This is optimal layout, as the order is (u32, u16, [u8]).
-    // SAFETY: Must be at offset 0 and accurate to trailing array length.
+    // SAFETY: Must be at offset 0 and
+    //   - accurate to trailing array length, or
+    //   - >= 1, the first text byte is 0xFF, and the text array is len 1.
     text_len: TextSize,
     kind: Kind,
-    text: str,
+    // SAFETY: Must be at offset 6 and
+    //  - valid UTF-8, or
+    //  - just [0xFF] (which isn't).
+    text: [u8],
+}
+
+impl fmt::Debug for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut d = f.debug_struct("Token");
+        d.field("text_len", &self.text_len);
+        d.field("kind", &self.kind);
+        if let Some(text) = self.text() {
+            d.field("text", &text);
+        } else {
+            d.field("text", &"{unknown}");
+        }
+        d.finish()
+    }
 }
 
 // Manually impl Eq/Hash so that builder can spoof it
@@ -43,7 +62,23 @@ impl Token {
 
     /// The text of this token.
     #[inline]
-    pub fn text(&self) -> &str {
+    pub fn text(&self) -> Option<&str> {
+        if self.is_thunk() {
+            None
+        } else {
+            Some(unsafe { str::from_utf8_unchecked(&self.text) })
+        }
+    }
+
+    /// Is this token a Thunk?
+    #[inline]
+    pub fn is_thunk(&self) -> bool {
+        self.text.len() != self.text_len.into()
+    }
+
+    /// The raw text of this token, which may be `&[0xFF]` for a thunk.
+    #[inline]
+    pub(crate) fn raw_text(&self) -> &[u8] {
         &self.text
     }
 
@@ -58,6 +93,10 @@ impl Token {
         let (layout, offset_0) = (Layout::new::<TextSize>(), 0);
         let (layout, offset_1) = layout.extend(Layout::new::<Kind>()).unwrap();
         let (layout, offset_2) = layout.extend(Layout::array::<u8>(len).unwrap()).unwrap();
+        // Assert layout assumptions
+        debug_assert_eq!(offset_0, 0);
+        debug_assert_eq!(offset_1, 4);
+        debug_assert_eq!(offset_2, 6);
         (layout.pad_to_align(), [offset_0, offset_1, offset_2])
     }
 
@@ -82,14 +121,45 @@ impl Token {
             })
         }
     }
+
+    #[allow(clippy::new_ret_no_self)]
+    pub(super) fn new_thunk<A>(kind: Kind, len: TextSize) -> A
+    where
+        A: AllocSliceDst<Self>,
+    {
+        assert!(len > 0.into());
+        let (layout, [text_len_offset, kind_offset, text_offset]) = Self::layout(1);
+
+        unsafe {
+            // SAFETY: closure fully initializes the place
+            A::new_slice_dst(1, |ptr| {
+                let raw = ptr.as_ptr().cast::<u8>();
+                ptr::write(raw.add(text_len_offset).cast(), len);
+                ptr::write(raw.add(kind_offset).cast(), kind);
+                ptr::write(raw.add(text_offset).cast(), 0xFFu8);
+                debug_assert_eq!(layout, Layout::for_value(ptr.as_ref()));
+            })
+        }
+    }
 }
 
 // SAFETY: un/erase correctly round-trips a pointer
 unsafe impl Erasable for Token {
     unsafe fn unerase(this: ErasedPtr) -> ptr::NonNull<Self> {
-        // SAFETY: text_len is at 0 offset
+        // SAFETY: text_len is at offset 0
         let text_len: TextSize = ptr::read(this.cast().as_ptr());
-        let ptr = ptr::slice_from_raw_parts_mut(this.as_ptr().cast(), text_len.into());
+        let tail_len = if text_len > 0.into() {
+            // SAFETY: text is at offset 6
+            let string_head = ptr::read(this.cast::<u8>().as_ptr().offset(6));
+            if string_head == 0xFF {
+                1
+            } else {
+                text_len.into()
+            }
+        } else {
+            text_len.into()
+        };
+        let ptr = ptr::slice_from_raw_parts_mut(this.as_ptr().cast(), tail_len);
         // SAFETY: ptr comes from NonNull
         Self::retype(ptr::NonNull::new_unchecked(ptr))
     }
