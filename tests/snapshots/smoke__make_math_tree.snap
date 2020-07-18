@@ -3,58 +3,61 @@ source: tests/smoke.rs
 expression: tree
 ---
 Node {
+    children_len: 5,
     kind: Kind(3),
     text_len: 13,
     children: [
-        Node {
+        (offset 0) Node {
+            children_len: 5,
             kind: Kind(3),
             text_len: 9,
             children: [
-                Token {
+                (offset 0) Token {
                     text_len: 1,
                     kind: Kind(2),
                     text: "1",
                 },
-                Token {
+                (offset 1) Token {
                     text_len: 1,
                     kind: Kind(0),
                     text: " ",
                 },
-                Token {
+                (offset 2) Token {
                     text_len: 1,
                     kind: Kind(1),
                     text: "+",
                 },
-                Token {
+                (offset 3) Token {
                     text_len: 1,
                     kind: Kind(0),
                     text: " ",
                 },
-                Node {
+                (offset 4) Node {
+                    children_len: 5,
                     kind: Kind(3),
                     text_len: 5,
                     children: [
-                        Token {
+                        (offset 0) Token {
                             text_len: 1,
                             kind: Kind(2),
                             text: "2",
                         },
-                        Token {
+                        (offset 1) Token {
                             text_len: 1,
                             kind: Kind(0),
                             text: " ",
                         },
-                        Token {
+                        (offset 2) Token {
                             text_len: 1,
                             kind: Kind(1),
                             text: "*",
                         },
-                        Token {
+                        (offset 3) Token {
                             text_len: 1,
                             kind: Kind(0),
                             text: " ",
                         },
-                        Token {
+                        (offset 4) Token {
                             text_len: 1,
                             kind: Kind(2),
                             text: "3",
@@ -63,22 +66,22 @@ Node {
                 },
             ],
         },
-        Token {
+        (offset 9) Token {
             text_len: 1,
             kind: Kind(0),
             text: " ",
         },
-        Token {
+        (offset 10) Token {
             text_len: 1,
             kind: Kind(1),
             text: "+",
         },
-        Token {
+        (offset 11) Token {
             text_len: 1,
             kind: Kind(0),
             text: " ",
         },
-        Token {
+        (offset 12) Token {
             text_len: 1,
             kind: Kind(2),
             text: "4",

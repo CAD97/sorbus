@@ -2,50 +2,31 @@
 use slice_dst::TryAllocSliceDst;
 use {
     crate::{
-        green::{unpack_element, Children, ChildrenWithOffsets, Element},
-        Kind, NodeOrToken, TextSize,
+        green::{
+            unpack_node_or_token, Children, Element, FullAlignedElement, HalfAlignedElement,
+            PackedNodeOrToken,
+        },
+        Kind, TextSize,
     },
     erasable::{Erasable, ErasedPtr},
     ptr_union::Enum2,
     slice_dst::{AllocSliceDst, SliceDst},
-    std::{alloc::Layout, fmt, hash, mem::ManuallyDrop, ptr, sync::Arc, u16},
+    std::{alloc::Layout, hash, mem::ManuallyDrop, ptr, sync::Arc, u16},
 };
 
 /// A nonleaf node in the immutable green tree.
 ///
 /// Nodes are crated using [`Builder::node`](crate::green::Builder::node).
-#[repr(C, align(2))] // NB: align >= 2
-#[derive(Eq)]
+#[repr(C, align(8))] // NB: align >= 8
+#[derive(Debug, Eq)]
 pub struct Node {
-    // NB: This is optimal layout, as the order is (u16, u16, u32, [usize])
+    // NB: This is optimal layout, as the order is (u16, u16, u32, [{see element.rs}])
     // SAFETY: Must be at offset 0 and accurate to trailing array length.
-    children_len: u16,
-    kind: Kind,
-    text_len: TextSize,
-    children: [ManuallyDrop<Element>],
-}
-struct DebugChildren<'a>(&'a Node);
-impl fmt::Debug for DebugChildren<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut list = f.debug_list();
-        for child in self.0.children() {
-            match child {
-                NodeOrToken::Node(node) => list.entry(&node),
-                NodeOrToken::Token(token) => list.entry(&token),
-            };
-        }
-        list.finish()
-    }
-}
-
-impl fmt::Debug for Node {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Node")
-            .field("kind", &self.kind)
-            .field("text_len", &self.text_len)
-            .field("children", &DebugChildren(self))
-            .finish()
-    }
+    children_len: u16,  // align 8 + 0, size 2
+    kind: Kind,         // align 8 + 2, size 2
+    text_len: TextSize, // align 8 + 4, size 4
+    // SAFETY: Must be aligned to 8
+    children: [Element], // align 8 + 0, dyn size
 }
 
 // Manually impl Eq/Hash to match Token
@@ -104,11 +85,16 @@ impl Drop for Node {
         /// like `ManuallyDrop::take`. The node must not be used (even to drop)
         /// after calling this function.
         unsafe fn drop_into(this: &mut Node, stack: &mut Vec<Arc<Node>>) {
-            for child in this.children.iter_mut() {
-                if let NodeOrToken::Node(node) = unpack_element(ManuallyDrop::take(child)) {
-                    stack.push(node)
+            let mut children = this.children.iter_mut();
+            let mut enqueue = |pack: PackedNodeOrToken| {
+                unpack_node_or_token(pack).map(|node| stack.push(node), drop)
+            };
+            (|| -> Option<()> {
+                loop {
+                    enqueue(children.next()?.full_aligned_mut().take());
+                    enqueue(children.next()?.half_aligned_mut().take());
                 }
-            }
+            })();
         }
 
         unsafe {
@@ -119,10 +105,6 @@ impl Drop for Node {
             }
         }
     }
-}
-
-fn unwrap_manually_drop_slice<T>(arr: &[ManuallyDrop<T>]) -> &[T] {
-    unsafe { &*(arr as *const [ManuallyDrop<T>] as *const [T]) }
 }
 
 #[allow(clippy::len_without_is_empty)]
@@ -147,12 +129,22 @@ impl Node {
     /// Child elements of this node.
     #[inline]
     pub fn children(&self) -> Children<'_> {
-        Children::new(unwrap_manually_drop_slice(&self.children))
+        unsafe { Children::new(&self.children) }
     }
 
-    /// Child elements of this node with their cumulative offset from this node.
-    pub fn children_with_offsets(&self) -> ChildrenWithOffsets<'_> {
-        ChildrenWithOffsets::new(unwrap_manually_drop_slice(&self.children))
+    /// The index of the child that contains the given offset.
+    ///
+    /// If the offset is the start of a node, returns that node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the given offset is outside of this node.
+    #[inline]
+    pub fn index_of_offset(&self, offset: TextSize) -> usize {
+        assert!(offset < self.len());
+        self.children
+            .binary_search_by_key(&offset, |el| el.offset())
+            .unwrap_or_else(|index| index - 1)
     }
 }
 
@@ -176,12 +168,17 @@ impl ChildrenWriter {
         ChildrenWriter { raw, len: 0, text_len: 0.into() }
     }
 
-    unsafe fn push(&mut self, element: Element) {
+    unsafe fn push(&mut self, element: PackedNodeOrToken) {
+        let offset = self.text_len;
         self.text_len += match element.as_deref_unchecked().unpack() {
             Enum2::A(node) => node.len(),
             Enum2::B(token) => token.len(),
         };
-        ptr::write(self.raw.add(self.len), element);
+        if self.len % 2 == 0 {
+            FullAlignedElement::write(self.raw.add(self.len), element, offset);
+        } else {
+            HalfAlignedElement::write(self.raw.add(self.len), element, offset);
+        }
         self.len += 1;
     }
 
@@ -197,6 +194,7 @@ impl Node {
         let (layout, offset_1) = layout.extend(Layout::new::<Kind>()).unwrap();
         let (layout, offset_2) = layout.extend(Layout::new::<TextSize>()).unwrap();
         let (layout, offset_3) = layout.extend(Layout::array::<Element>(len).unwrap()).unwrap();
+        let layout = layout.align_to(8).unwrap();
         (layout.pad_to_align(), [offset_0, offset_1, offset_2, offset_3])
     }
 
@@ -204,7 +202,7 @@ impl Node {
     pub(super) fn new<A, I>(kind: Kind, mut children: I) -> A
     where
         A: AllocSliceDst<Self>,
-        I: Iterator<Item = Element> + ExactSizeIterator,
+        I: Iterator<Item = PackedNodeOrToken> + ExactSizeIterator,
     {
         let len = children.len();
         assert!(len <= u16::MAX as usize, "more children than fit in one node");
@@ -239,7 +237,7 @@ impl Node {
     pub(super) fn try_new<A, I, E>(kind: Kind, mut children: I) -> Result<A, E>
     where
         A: TryAllocSliceDst<Self>,
-        I: Iterator<Item = Result<Element, E>> + ExactSizeIterator,
+        I: Iterator<Item = Result<PackedNodeOrToken, E>> + ExactSizeIterator,
     {
         let len = children.len();
         assert!(len <= u16::MAX as usize, "more children than fit in one node");
