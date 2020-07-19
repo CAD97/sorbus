@@ -22,7 +22,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: beta
           override: true
           components: clippy
       - name: Check
@@ -60,7 +60,7 @@ jobs:
         id: toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly
+          toolchain: beta
           profile: minimal
           override: true
       - name: Cache
@@ -91,7 +91,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: beta
           override: true
           components: miri, rust-src
       - name: Cache
@@ -127,7 +127,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: beta
           override: true
       - name: Cache
         uses: actions/cache@v1
@@ -137,7 +137,7 @@ jobs:
       - name: Run Tarpaulin
         uses: actions-rs/tarpaulin@v0.1
         with:
-          version: '0.14.1'
+          version: '0.14.2'
           args: --all-features --ignore-tests --run-types Tests Doctests Examples
       - name: Upload coverage report
         uses: codecov/codecov-action@v1
