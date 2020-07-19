@@ -4,7 +4,7 @@ extern crate serde; // this line required to workaround rust-lang/rust#55779
 
 use {
     crate::{
-        green::{pack_element, Builder, Element, Node, Token},
+        green::{pack_node_or_token, Builder, Node, PackedNodeOrToken, Token},
         Kind, NodeOrToken,
     },
     rc_box::ArcBox,
@@ -304,7 +304,7 @@ struct SeqAccessExactSizeIterator<'a, 'de, Seq: SeqAccess<'de>>(
     PhantomData<&'de ()>,
 );
 impl<'de, Seq: SeqAccess<'de>> Iterator for SeqAccessExactSizeIterator<'_, 'de, Seq> {
-    type Item = Result<Element, Seq::Error>;
+    type Item = Result<PackedNodeOrToken, Seq::Error>;
     fn next(&mut self) -> Option<Self::Item> {
         self.1.next_element_seed(ElementSeed(self.0)).transpose()
     }
@@ -323,7 +323,7 @@ impl<'de, Seq: SeqAccess<'de>> ExactSizeIterator for SeqAccessExactSizeIterator<
 
 struct ElementSeed<'a>(&'a mut Builder);
 impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
-    type Value = Element;
+    type Value = PackedNodeOrToken;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -334,7 +334,7 @@ impl<'de> DeserializeSeed<'de> for ElementSeed<'_> {
     }
 }
 impl<'de> Visitor<'de> for ElementSeed<'_> {
-    type Value = Element;
+    type Value = PackedNodeOrToken;
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "a sorbus green node or token")
     }
@@ -350,7 +350,7 @@ impl<'de> Visitor<'de> for ElementSeed<'_> {
             Token,
         }
 
-        Ok(pack_element(match data.variant()? {
+        Ok(pack_node_or_token(match data.variant()? {
             (Variant::Node, variant) => {
                 NodeOrToken::Node(variant.struct_variant(&["kind", "children"], NodeSeed(self.0))?)
             }

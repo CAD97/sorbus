@@ -32,6 +32,7 @@ ser = ["serde", "text-size/serde"]
 de = ["serde", "serde/derive"]
 
 [dev-dependencies]
+criterion = "0.3"
 insta = { version = "0.16", features = ["ron"] }
 serde_json = "1.0.53"
 serde_test = "1.0.110"
@@ -39,3 +40,7 @@ serde_test = "1.0.110"
 [[test]]
 name = "serde"
 required-features = ["ser", "de"]
+
+[[bench]]
+name = "node_children"
+harness = false

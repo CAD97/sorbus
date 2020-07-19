@@ -1,6 +1,6 @@
 use {
     crate::{
-        green::{borrow_element, Element, Node, Token},
+        green::{Element, Node, Token},
         ArcBorrow, NodeOrToken, TextSize,
     },
     std::{iter::FusedIterator, slice},
@@ -10,6 +10,14 @@ use {
 ///
 /// This iterator is cheap to clone (basically a copy),
 /// and random access (`get` or `nth`) is constant time.
+///
+/// # Performance note
+///
+/// Internal iteration (`fold`, `for_each`; the callback iteration APIs)
+/// is much more performant than external iteration (`for`, `next`)
+/// for this iterator: up to 20-30% better (depending on how you measure)
+/// for straight-line children iteration, and approximately 10% better for a
+/// more usual tree visitor pattern that descends into transitive children.
 #[derive(Debug, Clone)]
 pub struct Children<'a> {
     inner: slice::Iter<'a, Element>,
@@ -18,147 +26,180 @@ pub struct Children<'a> {
 /// Children elements of a node in the immutable green tree,
 /// with text offsets from the parent node.
 ///
-/// This iterator is cheap to clone (basically a copy).
+/// This iterator is cheap to clone (basically a copy),
+/// and random access (`get` or `nth`) is constant time.
+///
+/// # Performance note
+///
+/// Internal iteration (`fold`, `for_each`; the callback iteration APIs)
+/// is much more performant than external iteration (`for`, `next`)
+/// for this iterator: up to 20-30% better (depending on how you measure)
+/// for straight-line children iteration, and approximately 10% better for a
+/// more usual tree visitor pattern that descends into transitive children.
 #[derive(Debug, Clone)]
 pub struct ChildrenWithOffsets<'a> {
-    cumulative_offset: TextSize,
-    inner: Children<'a>,
+    inner: slice::Iter<'a, Element>,
 }
 
 impl<'a> Children<'a> {
-    pub(super) fn new(elements: &'a [Element]) -> Self {
+    pub(super) unsafe fn new(elements: &'a [Element]) -> Self {
         Children { inner: elements.iter() }
     }
 }
 
-impl<'a> ChildrenWithOffsets<'a> {
-    pub(super) fn new(elements: &'a [Element]) -> Self {
-        ChildrenWithOffsets { cumulative_offset: 0.into(), inner: Children::new(elements) }
-    }
+macro_rules! impl_children_iter {
+    ($T:ident of $Item:ty) => {
+        impl<'a> $T<'a> {
+            /// Get the next item in the iterator without advancing it.
+            #[inline]
+            pub fn peek(&self) -> Option<<Self as Iterator>::Item> {
+                let element = self.inner.as_slice().first()?;
+                Some(element.into())
+            }
+
+            /// Get the nth item in the iterator without advancing it.
+            #[inline]
+            pub fn get(&self, n: usize) -> Option<<Self as Iterator>::Item> {
+                let element = self.inner.as_slice().get(n)?;
+                Some(element.into())
+            }
+
+            /// Divide this iterator into two at an index.
+            ///
+            /// The first will contain all indices from `[0, mid)`,
+            /// and the second will contain all indices from `[mid, len)`.
+            ///
+            /// # Panics
+            ///
+            /// Panics if `mid > len`.
+            #[inline]
+            pub fn split_at(&self, mid: usize) -> (Self, Self) {
+                let (left, right) = self.inner.as_slice().split_at(mid);
+                (Self { inner: left.iter() }, Self { inner: right.iter() })
+            }
+        }
+
+        impl<'a> Iterator for $T<'a> {
+            type Item = $Item;
+
+            #[inline]
+            fn next(&mut self) -> Option<Self::Item> {
+                let element = self.inner.next()?;
+                Some(element.into())
+            }
+
+            #[inline]
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.inner.size_hint()
+            }
+
+            #[inline]
+            fn count(self) -> usize {
+                self.inner.count()
+            }
+
+            #[inline]
+            fn last(mut self) -> Option<Self::Item> {
+                self.next_back()
+            }
+
+            #[inline]
+            fn nth(&mut self, n: usize) -> Option<Self::Item> {
+                let element = self.inner.nth(n)?;
+                Some(element.into())
+            }
+
+            #[inline]
+            fn fold<B, F>(mut self, init: B, mut f: F) -> B
+            where
+                F: FnMut(B, Self::Item) -> B,
+            {
+                // Nota Bene: this is performance-sensitive iteration code.
+                // Seemingly minor refactorings can have large impacts on the
+                // throughput of this code; make sure to run the benchmarks!
+
+                // For example, changing the below loop from
+                //    if condition { B(); }
+                //    loop { A(); B(); }
+                // to the current (as of PR#37, and this comment)
+                //    if condition { loop { B(); A(); } }
+                //    else         { loop { A(); B(); } }
+                // led to a 10%(!) difference in benchmark throughput.
+
+                let mut accum = init;
+
+                let mut el;
+                macro_rules! next {
+                    () => {
+                        if let Some(element) = self.inner.next() {
+                            el = element;
+                        } else {
+                            return accum;
+                        }
+                    };
+                }
+
+                next!();
+                unsafe {
+                    if el.is_half_aligned() {
+                        loop {
+                            accum = f(accum, el.half_aligned().into());
+                            next!();
+                            accum = f(accum, el.full_aligned().into());
+                            next!();
+                        }
+                    } else {
+                        loop {
+                            accum = f(accum, el.full_aligned().into());
+                            next!();
+                            accum = f(accum, el.half_aligned().into());
+                            next!();
+                        }
+                    }
+                }
+            }
+        }
+
+        impl ExactSizeIterator for $T<'_> {
+            #[inline]
+            fn len(&self) -> usize {
+                self.inner.len()
+            }
+        }
+
+        impl DoubleEndedIterator for $T<'_> {
+            #[inline]
+            fn next_back(&mut self) -> Option<Self::Item> {
+                let element = self.inner.next_back()?;
+                Some(element.into())
+            }
+
+            #[inline]
+            fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+                let element = self.inner.nth_back(n)?;
+                Some(element.into())
+            }
+        }
+
+        impl FusedIterator for $T<'_> {}
+    };
 }
+
+impl_children_iter!(Children of NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>);
+impl_children_iter!(ChildrenWithOffsets of (TextSize, NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>));
 
 impl<'a> Children<'a> {
+    /// Iterate the children with their offsets from the parent node.
     #[inline]
-    /// Get the next value without advancing the iterator.
-    pub fn peek(&self) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
-        let element = self.inner.as_slice().first()?;
-        Some(borrow_element(element))
-    }
-
-    #[inline]
-    /// Get the nth value without advancing the iterator.
-    pub fn get(&self, n: usize) -> Option<NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>> {
-        let element = self.inner.as_slice().get(n)?;
-        Some(borrow_element(element))
-    }
-
-    #[inline]
-    /// Split this iterator around some index.
-    /// The first will contain all indices from `[0, mid)`
-    /// and the second will contain all indices from `[mid, len)`.
-    ///
-    ///  # Panics
-    ///
-    /// Panics if `mid > len`.
-    pub fn split_at(&self, mid: usize) -> (Self, Self) {
-        let (left, right) = self.inner.as_slice().split_at(mid);
-        (Self { inner: left.iter() }, Self { inner: right.iter() })
+    pub fn with_offsets(&self) -> ChildrenWithOffsets<'a> {
+        ChildrenWithOffsets { inner: self.inner.clone() }
     }
 }
 
-impl<'a> Iterator for Children<'a> {
-    type Item = NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>;
-
+impl<'a> ChildrenWithOffsets<'a> {
+    /// Iterate the children without their offsets.
     #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let element = self.inner.next()?;
-        Some(borrow_element(element))
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-
-    #[inline]
-    fn count(self) -> usize {
-        self.inner.count()
-    }
-
-    #[inline]
-    fn last(mut self) -> Option<Self::Item> {
-        self.next_back()
-    }
-
-    #[inline]
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let element = self.inner.nth(n)?;
-        Some(borrow_element(element))
-    }
-
-    #[inline]
-    fn fold<B, F>(self, init: B, mut f: F) -> B
-    where
-        F: FnMut(B, Self::Item) -> B,
-    {
-        self.inner.fold(init, |b, item| f(b, borrow_element(item)))
-    }
-}
-
-impl ExactSizeIterator for Children<'_> {
-    #[inline]
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-}
-
-impl DoubleEndedIterator for Children<'_> {
-    #[inline]
-    fn next_back(&mut self) -> Option<Self::Item> {
-        let element = self.inner.next_back()?;
-        Some(borrow_element(element))
-    }
-
-    #[inline]
-    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        let element = self.inner.nth_back(n)?;
-        Some(borrow_element(element))
-    }
-}
-
-impl FusedIterator for Children<'_> {}
-
-impl<'a> Iterator for ChildrenWithOffsets<'a> {
-    type Item = (TextSize, NodeOrToken<ArcBorrow<'a, Node>, ArcBorrow<'a, Token>>);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let element = self.inner.next()?;
-        let offset = self.cumulative_offset;
-        self.cumulative_offset += element.len();
-        Some((offset, element))
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-
-    #[inline]
-    fn count(self) -> usize {
-        self.inner.count()
-    }
-
-    #[inline]
-    fn fold<B, F>(self, init: B, mut f: F) -> B
-    where
-        F: FnMut(B, Self::Item) -> B,
-    {
-        let mut cumulative_offset = self.cumulative_offset;
-        self.inner.fold(init, move |b, item| {
-            let offset = cumulative_offset;
-            cumulative_offset += item.len();
-            f(b, (offset, item))
-        })
+    pub fn without_offsets(&self) -> Children<'a> {
+        Children { inner: self.inner.clone() }
     }
 }

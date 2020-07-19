@@ -1,6 +1,6 @@
 use {
     crate::{
-        green::{pack_element, Element, Node, Token},
+        green::{pack_node_or_token, Node, PackedNodeOrToken, Token},
         ArcBorrow, Kind, NodeOrToken,
     },
     erasable::{ErasablePtr, ErasedPtr},
@@ -119,7 +119,7 @@ impl Builder {
         let (node, ()) = match entry {
             RawEntryMut::Occupied(entry) => entry.into_key_value(),
             RawEntryMut::Vacant(entry) => {
-                let node = Node::new(kind, children.map(Into::into).map(pack_element));
+                let node = Node::new(kind, children.map(Into::into).map(pack_node_or_token));
                 entry.insert_with_hasher(hash, node, (), |node| {
                     thin_node_hash(hasher, node.kind(), erased_children(node.children()))
                 })
@@ -132,15 +132,22 @@ impl Builder {
     /// Version of `Builder::node` taking a pre-packed child element iterator.
     pub(super) fn node_packed<I>(&mut self, kind: Kind, children: I) -> Arc<Node>
     where
-        I: Iterator<Item = Element> + ExactSizeIterator + AsRef<[Element]>,
+        I: Iterator<Item = PackedNodeOrToken> + ExactSizeIterator + AsRef<[PackedNodeOrToken]>,
     {
         let hasher = &self.hasher;
 
-        let hash =
-            thin_node_hash(hasher, kind, children.as_ref().iter().map(Element::as_untagged_ptr));
+        let hash = thin_node_hash(
+            hasher,
+            kind,
+            children.as_ref().iter().map(PackedNodeOrToken::as_untagged_ptr),
+        );
 
         let entry = self.nodes.raw_entry_mut().from_hash(hash, |node| {
-            thin_node_eq(node, kind, children.as_ref().iter().map(Element::as_untagged_ptr))
+            thin_node_eq(
+                node,
+                kind,
+                children.as_ref().iter().map(PackedNodeOrToken::as_untagged_ptr),
+            )
         });
 
         let (node, ()) = match entry {
