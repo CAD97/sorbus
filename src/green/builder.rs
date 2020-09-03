@@ -216,9 +216,9 @@ impl Builder {
 impl Builder {
     fn collect_root_nodes(&mut self) -> Vec<Arc<Node>> {
         // NB: `drain_filter` is `retain` but with an iterator of the removed elements.
-        // i.e.: elements where the predicate is FALSE are removed and iterated over.
+        // i.e.: elements where the predicate is TRUE are removed and iterated over.
         self.nodes
-            .drain_filter(|node, ()| Arc::strong_count(node) > 1)
+            .drain_filter(|node, ()| Arc::strong_count(node) <= 1)
             .map(|(node, _)| node)
             .collect()
     }
